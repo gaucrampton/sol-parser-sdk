@@ -111,13 +111,10 @@ pub fn parse_rpc_transaction(
         }
     });
 
-    // Build program_invokes HashMap for account filling
-    // Use string keys to match gRPC parsing logic
-    let mut program_invokes: HashMap<&str, Vec<(i32, i32)>> = HashMap::new();
+    let mut program_invokes: HashMap<Pubkey, Vec<(i32, i32)>> = HashMap::new();
 
     if let Some(ref tx) = grpc_tx_opt {
         if let Some(ref msg) = tx.message {
-            // Build account key lookup
             let keys_len = msg.account_keys.len();
             let writable_len = grpc_meta.loaded_writable_addresses.len();
             let get_key = |i: usize| -> Option<&Vec<u8>> {
@@ -130,27 +127,18 @@ pub fn parse_rpc_transaction(
                 }
             };
 
-            // Record outer instructions
             for (i, ix) in msg.instructions.iter().enumerate() {
                 let pid = get_key(ix.program_id_index as usize)
                     .map_or(Pubkey::default(), |k| read_pubkey_fast(k));
-                let pid_str = pid.to_string();
-                let pid_static: &'static str = pid_str.leak();
-                program_invokes.entry(pid_static).or_default().push((i as i32, -1));
+                program_invokes.entry(pid).or_default().push((i as i32, -1));
             }
 
-            // Record inner instructions
             for inner in &grpc_meta.inner_instructions {
                 let outer_idx = inner.index as usize;
                 for (j, inner_ix) in inner.instructions.iter().enumerate() {
                     let pid = get_key(inner_ix.program_id_index as usize)
                         .map_or(Pubkey::default(), |k| read_pubkey_fast(k));
-                    let pid_str = pid.to_string();
-                    let pid_static: &'static str = pid_str.leak();
-                    program_invokes
-                        .entry(pid_static)
-                        .or_default()
-                        .push((outer_idx as i32, j as i32));
+                    program_invokes.entry(pid).or_default().push((outer_idx as i32, j as i32));
                 }
             }
         }
@@ -189,7 +177,7 @@ pub fn parse_rpc_transaction(
             }
 
             // Fill account fields - use same function as gRPC parsing
-            crate::core::account_dispatcher::fill_accounts_from_transaction_data(
+            crate::core::account_dispatcher::fill_accounts_with_owned_keys(
                 &mut event,
                 &grpc_meta,
                 &grpc_tx_opt,

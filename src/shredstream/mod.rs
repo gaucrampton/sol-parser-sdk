@@ -28,8 +28,8 @@
 //!
 //! ## 限制说明
 //! ShredStream 相比 gRPC 订阅有以下限制：
-//! - 仅 `static_account_keys()`，使用 ALT 的交易会有错误账户
-//! - 无 Inner Instructions，无法解析 CPI 调用
+//! - 仅 `static_account_keys()`：V0 交易若带 **地址查找表（ALT）**，超出静态表的账户索引无法解析，对应腿可能解析失败；无 ALT 时静态表即全表。
+//! - 不解析 **inner instructions**：多笔买必须体现在 **多条外层** Pump `buy` / `buy_exact_sol_in` 上（铸币捆绑通常如此）；若全塞进单条 outer 的 CPI 链则 ShredStream 无法逐腿还原。
 //! - 无 block_time，恒为 0
 //! - tx_index 是 entry 内索引而非 slot 内索引
 

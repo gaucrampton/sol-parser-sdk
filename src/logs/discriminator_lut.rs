@@ -226,12 +226,18 @@ macro_rules! disc_entry {
 ///
 /// Expected latency: 3-8ns (binary search on 31 entries = max 5 comparisons)
 pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
-    // Raydium AMM V4 events (sorted first - smallest discriminators)
+    // 按 discriminator 数值升序（binary_search 要求）
     disc_entry!(
         0x0100000000000000,
         "Raydium AMM Initialize2",
         parse_raydium_amm_initialize2,
         Protocol::RaydiumAmm
+    ),
+    disc_entry!(
+        0x012C5B686FD026A0,
+        "Raydium CLMM Decrease Liquidity",
+        parse_raydium_clmm_decrease_liquidity,
+        Protocol::RaydiumClmm
     ),
     disc_entry!(
         0x0300000000000000,
@@ -252,23 +258,22 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::RaydiumAmm
     ),
     disc_entry!(
-        0x0B00000000000000,
-        "Raydium AMM Swap Base Out",
-        parse_raydium_amm_swap_base_out,
-        Protocol::RaydiumAmm
-    ),
-    // Raydium CLMM events
-    disc_entry!(
-        0x012C5B686FD026A0,
-        "Raydium CLMM Decrease Liquidity",
-        parse_raydium_clmm_decrease_liquidity,
-        Protocol::RaydiumClmm
-    ),
-    disc_entry!(
         0x0AB0EE45DF591D85,
         "Raydium CLMM Increase Liquidity",
         parse_raydium_clmm_increase_liquidity,
         Protocol::RaydiumClmm
+    ),
+    disc_entry!(
+        0xABB5CA7047241A6,
+        "Orca Whirlpool Liquidity Decreased",
+        parse_orca_liquidity_decreased,
+        Protocol::OrcaWhirlpool
+    ),
+    disc_entry!(
+        0x0B00000000000000,
+        "Raydium AMM Swap Base Out",
+        parse_raydium_amm_swap_base_out,
+        Protocol::RaydiumAmm
     ),
     // Raydium CPMM events
     disc_entry!(
@@ -324,12 +329,6 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         0xA19BFE6690071E1E,
         "Orca Whirlpool Liquidity Increased",
         parse_orca_liquidity_increased,
-        Protocol::OrcaWhirlpool
-    ),
-    disc_entry!(
-        0xABB5CA7047241A6,
-        "Orca Whirlpool Liquidity Decreased",
-        parse_orca_liquidity_decreased,
         Protocol::OrcaWhirlpool
     ),
     disc_entry!(

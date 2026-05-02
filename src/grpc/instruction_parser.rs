@@ -22,10 +22,10 @@ use yellowstone_grpc_proto::prelude::{Transaction, TransactionStatusMeta};
 /// 4. 填充账户上下文
 ///
 /// # 性能优化
-/// - 并行解析多个指令（rayon）
-/// - 零拷贝读取指令数据
-/// - 内联优化所有热路径
-/// - 提前过滤不需要的事件
+/// - 零分配泄漏：`program_invokes` 全程 `Pubkey` 键，与账户填充 / `fill_data` 共用同一表
+/// - 零拷贝读取指令账户字节、`read_pubkey_fast` 解码
+/// - 热路径 `#[inline]`
+/// - `should_parse_instructions` 提前跳过整段 ix 解析
 #[inline]
 pub fn parse_instructions_enhanced(
     meta: &TransactionStatusMeta,
@@ -132,11 +132,7 @@ pub fn parse_instructions_enhanced(
         }
     }
 
-    // 步骤 3.5: 转换 invokes HashMap 为字符串键（用于 fill_data）
-    let invokes_str: HashMap<&str, Vec<(i32, i32)>> =
-        invokes.iter().map(|(k, v)| (k.to_string().leak() as &str, v.clone())).collect();
-
-    // 步骤 4: 填充账户上下文
+    // 步骤 4: 填充账户上下文（invokes 与 fill_data 均使用 Pubkey 键，无堆泄漏）
     let mut final_result = Vec::with_capacity(merged.len());
     for mut event in merged {
         crate::core::account_dispatcher::fill_accounts_with_owned_keys(
@@ -145,7 +141,7 @@ pub fn parse_instructions_enhanced(
             transaction,
             &invokes,
         );
-        crate::core::common_filler::fill_data(&mut event, meta, transaction, &invokes_str);
+        crate::core::common_filler::fill_data(&mut event, meta, transaction, &invokes);
         final_result.push(event);
     }
 
@@ -178,16 +174,29 @@ fn parse_outer_instruction<'a>(
         return None;
     }
 
-    // 构建账户列表
-    let accounts: Vec<Pubkey> = account_indices
-        .iter()
-        .filter_map(|&idx| get_key(idx as usize).map(|k| read_pubkey_fast(k)))
-        .collect();
-
-    // 调用现有的 instruction 解析器
-    crate::instr::parse_instruction_unified(
-        data, &accounts, sig, slot, tx_idx, block_us, grpc_us, filter, program_id,
-    )
+    // 常见 DEX 指令账户数远小于 64；栈上缓冲避免每笔 outer 一次 Vec 分配
+    const STACK_CAP: usize = 64;
+    if account_indices.len() <= STACK_CAP {
+        let mut stack = [Pubkey::default(); STACK_CAP];
+        let mut n = 0usize;
+        for &idx in account_indices {
+            if let Some(k) = get_key(idx as usize) {
+                stack[n] = read_pubkey_fast(k);
+                n += 1;
+            }
+        }
+        crate::instr::parse_instruction_unified(
+            data, &stack[..n], sig, slot, tx_idx, block_us, grpc_us, filter, program_id,
+        )
+    } else {
+        let accounts: Vec<Pubkey> = account_indices
+            .iter()
+            .filter_map(|&idx| get_key(idx as usize).map(|k| read_pubkey_fast(k)))
+            .collect();
+        crate::instr::parse_instruction_unified(
+            data, &accounts, sig, slot, tx_idx, block_us, grpc_us, filter, program_id,
+        )
+    }
 }
 
 /// 解析单个 inner instruction
@@ -278,17 +287,19 @@ fn parse_inner_instruction(
 ///
 /// 合并策略：
 /// 1. 同一个 outer_idx 的 instruction 和 inner instruction 可以合并
-/// 2. Inner instruction 在 outer instruction 之后出现
-/// 3. 合并后返回更完整的事件
+/// 2. Inner instruction 在 outer instruction 之后出现（排序保证主指令在前）
+/// 3. 同一 outer 下若有多个 inner，依次链式合并进同一条事件，再输出
+/// 4. 合并后返回更完整的事件
 #[inline]
 fn merge_instruction_events(events: Vec<(usize, Option<usize>, DexEvent)>) -> Vec<DexEvent> {
     if events.is_empty() {
         return Vec::new();
     }
 
-    // 按 (outer_idx, inner_idx) 排序，确保顺序：outer -> inner
+    // 按 (outer_idx, inner_idx) 排序，确保顺序：同一 outer 下 **主指令在前、inner 在后**
+    // （`None` 若用 MAX 会把 outer 排到 inner 后面，导致无法 merge）
     let mut events = events;
-    events.sort_by_key(|(outer, inner, _)| (*outer, inner.unwrap_or(usize::MAX)));
+    events.sort_by_key(|(outer, inner, _)| (*outer, inner.map_or(0, |i| i + 1)));
 
     let mut result = Vec::with_capacity(events.len());
     let mut pending_outer: Option<(usize, DexEvent)> = None;
@@ -308,9 +319,9 @@ fn merge_instruction_events(events: Vec<(usize, Option<usize>, DexEvent)>) -> Ve
                 // 这是一个 inner instruction
                 if let Some((pending_outer_idx, mut outer_event)) = pending_outer.take() {
                     if pending_outer_idx == outer_idx {
-                        // 合并！
+                        // 合并进当前 outer（可多次：多段 inner 链式叠在同一条事件上）
                         merge_events(&mut outer_event, event);
-                        result.push(outer_event);
+                        pending_outer = Some((outer_idx, outer_event));
                     } else {
                         // 不匹配，分别保留
                         result.push(outer_event);
@@ -341,7 +352,14 @@ fn should_parse_instructions(filter: Option<&EventTypeFilter>) -> bool {
     // 如果 filter.include_only 为空，总是解析
     let Some(ref include_only) = filter.include_only else { return true };
 
-    // 检查是否包含需要从 instruction 解析的事件类型
+    // PumpFun：外层 BUY/SELL 在 `instr/pump.rs` 不解析，但每笔买 inner 里仍有 Trade CPI；
+    // 仅走 `log_messages` 时，若 RPC 截断日志会 **丢多笔 Trade**。
+    // 打开 instruction+inner 解析，与日志在 `dedupe_log_instruction_events` 中按序去重合并。
+    if filter.includes_pumpfun() {
+        return true;
+    }
+
+    // 其它协议：按需解析
     include_only.iter().any(|t| {
         use crate::grpc::types::EventType::*;
         matches!(
@@ -377,12 +395,12 @@ mod tests {
         };
         assert!(should_parse_instructions(Some(&filter)));
 
-        // 不包含需要 instruction 解析的事件类型
+        // PumpFun 订阅：需要 instruction+inner，避免仅日志时截断丢腿
         let filter = EventTypeFilter {
             include_only: Some(vec![EventType::PumpFunTrade]),
             exclude_types: None,
         };
-        assert!(!should_parse_instructions(Some(&filter)));
+        assert!(should_parse_instructions(Some(&filter)));
     }
 
     #[test]
@@ -427,6 +445,61 @@ mod tests {
             assert_eq!(trade.sol_amount, 1000); // 来自 inner
             assert_eq!(trade.token_amount, 2000); // 来自 inner
             assert_ne!(trade.bonding_curve, Pubkey::default()); // 来自 outer
+        } else {
+            panic!("Expected PumpFunTrade event");
+        }
+    }
+
+    #[test]
+    fn test_merge_instruction_events_chains_multiple_inners_same_outer() {
+        use solana_sdk::signature::Signature;
+
+        let metadata = EventMetadata {
+            signature: Signature::default(),
+            slot: 100,
+            tx_index: 1,
+            block_time_us: 1000,
+            grpc_recv_us: 2000,
+            recent_blockhash: None,
+        };
+
+        let bc = Pubkey::new_unique();
+        let fee = Pubkey::new_unique();
+
+        let outer_event = DexEvent::PumpFunTrade(PumpFunTradeEvent {
+            metadata: metadata.clone(),
+            bonding_curve: bc,
+            ..Default::default()
+        });
+
+        let inner_trade = DexEvent::PumpFunTrade(PumpFunTradeEvent {
+            metadata: metadata.clone(),
+            sol_amount: 1000,
+            token_amount: 2000,
+            is_buy: true,
+            ..Default::default()
+        });
+
+        // 第二段 inner 仅有 fee_recipient，无成交量 —— 不应抹掉第一段金额
+        let inner_fee_only = DexEvent::PumpFunTrade(PumpFunTradeEvent {
+            metadata: metadata.clone(),
+            fee_recipient: fee,
+            ..Default::default()
+        });
+
+        let events = vec![
+            (0, None, outer_event),
+            (0, Some(0), inner_trade),
+            (0, Some(1), inner_fee_only),
+        ];
+
+        let result = merge_instruction_events(events);
+        assert_eq!(result.len(), 1);
+        if let DexEvent::PumpFunTrade(trade) = &result[0] {
+            assert_eq!(trade.bonding_curve, bc);
+            assert_eq!(trade.sol_amount, 1000);
+            assert_eq!(trade.token_amount, 2000);
+            assert_eq!(trade.fee_recipient, fee);
         } else {
             panic!("Expected PumpFunTrade event");
         }

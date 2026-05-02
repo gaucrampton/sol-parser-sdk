@@ -3,7 +3,10 @@
 //! 不依赖 DEX 日志或指令解析，适用于：mentions 订阅后的 SOL/SPL 转账分析、审计、风控等。
 
 use std::collections::HashSet;
+use std::sync::Arc;
 
+use crate::instr::read_pubkey_fast;
+use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use yellowstone_grpc_proto::prelude::{Transaction, TransactionStatusMeta, TokenBalance};
 
@@ -192,6 +195,24 @@ pub fn spl_token_counterparty_by_owner(
     out.sort_by(|a, b| a.1.cmp(&b.1));
     out.dedup_by(|a, b| a.0 == b.0 && a.1 == b.1);
     out
+}
+
+/// 仅消息头里的静态 `account_keys`（与 ShredStream `VersionedTransaction::static_account_keys()` 语义对齐；
+/// 不含 ALT 加载地址）。
+#[inline]
+pub fn yellowstone_static_account_keys_arc(tx: &Option<Transaction>) -> Arc<[Pubkey]> {
+    let Some(t) = tx.as_ref() else {
+        return Arc::from(Vec::<Pubkey>::new().into_boxed_slice());
+    };
+    let Some(msg) = t.message.as_ref() else {
+        return Arc::from(Vec::<Pubkey>::new().into_boxed_slice());
+    };
+    let keys: Vec<Pubkey> = msg
+        .account_keys
+        .iter()
+        .map(|bytes| read_pubkey_fast(bytes.as_slice()))
+        .collect();
+    Arc::from(keys.into_boxed_slice())
 }
 
 /// Yellowstone 交易签名原始字节（64）→ `solana_sdk::signature::Signature`。

@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crossbeam_queue::ArrayQueue;
 use futures::StreamExt;
 use solana_entry::entry::Entry as SolanaEntry;
+use solana_sdk::message::VersionedMessage;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
@@ -187,7 +188,16 @@ impl ShredStreamClient {
         }
 
         let signature = transaction.signatures[0];
-        let accounts: Vec<_> = transaction.message.static_account_keys().to_vec();
+        if let VersionedMessage::V0(m) = &transaction.message {
+            if !m.address_table_lookups.is_empty() {
+                log::debug!(
+                    target: "sol_parser_sdk::shredstream",
+                    "V0 tx uses address lookup tables; only static keys are available — \
+                     some instruction account indices may resolve to wrong pubkeys (often only 1 BUY gets is_created_buy)"
+                );
+            }
+        }
+        let accounts: Vec<Pubkey> = transaction.message.static_account_keys().to_vec();
 
         // 解析交易中的指令
         let mut events = Vec::new();
@@ -354,7 +364,15 @@ impl ShredStreamClient {
             // BUY 指令
             d if d == discriminators::BUY => {
                 Self::parse_buy_instruction(
-                    ix_data, accounts, ix_accounts, signature, slot, tx_index, recv_us, created_mints, mayhem_mints,
+                    ix_data,
+                    accounts,
+                    ix_accounts,
+                    signature,
+                    slot,
+                    tx_index,
+                    recv_us,
+                    created_mints,
+                    mayhem_mints,
                 )
             }
             // SELL 指令
@@ -364,7 +382,15 @@ impl ShredStreamClient {
             // BUY_EXACT_SOL_IN 指令
             d if d == discriminators::BUY_EXACT_SOL_IN => {
                 Self::parse_buy_exact_sol_in_instruction(
-                    ix_data, accounts, ix_accounts, signature, slot, tx_index, recv_us, created_mints, mayhem_mints,
+                    ix_data,
+                    accounts,
+                    ix_accounts,
+                    signature,
+                    slot,
+                    tx_index,
+                    recv_us,
+                    created_mints,
+                    mayhem_mints,
                 )
             }
             _ => None,
@@ -593,10 +619,10 @@ impl ShredStreamClient {
         
         // 🔧 关键修复：只有当 mint 在 created_mints 中时，才标记为 is_created_buy
         let is_created_buy = created_mints.contains(&mint);
-        
+
         // 🔧 Mayhem Mode 检测：CREATE_V2 指令创建的代币是 Mayhem Mode
         let is_mayhem_mode = mayhem_mints.contains(&mint);
-        
+
         let metadata = EventMetadata {
             signature,
             slot,
@@ -754,10 +780,10 @@ impl ShredStreamClient {
         
         // 🔧 关键修复：只有当 mint 在 created_mints 中时，才标记为 is_created_buy
         let is_created_buy = created_mints.contains(&mint);
-        
+
         // 🔧 Mayhem Mode 检测：CREATE_V2 指令创建的代币是 Mayhem Mode
         let is_mayhem_mode = mayhem_mints.contains(&mint);
-        
+
         let metadata = EventMetadata {
             signature,
             slot,

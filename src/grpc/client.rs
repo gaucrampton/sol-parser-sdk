@@ -15,6 +15,8 @@ use crate::instr::read_pubkey_fast;
 use crate::logs::timestamp_to_microseconds;
 use crate::DexEvent;
 use crossbeam_queue::ArrayQueue;
+use solana_sdk::pubkey::Pubkey;
+use std::str::FromStr;
 use futures::{SinkExt, StreamExt};
 use log::error;
 use memchr::memmem;
@@ -492,10 +494,7 @@ fn parse_transaction_core(
         || parse_instructions(meta, &info.transaction, sig, slot, idx, block_us, grpc_us, filter),
     );
 
-    let mut result = Vec::with_capacity(log_events.len() + instr_events.len());
-    result.extend(log_events);
-    result.extend(instr_events);
-    result
+    crate::grpc::log_instr_dedup::dedupe_log_instruction_events(log_events, instr_events)
 }
 
 #[inline(always)]
@@ -528,7 +527,7 @@ fn parse_logs(
 
     let mut outer_idx: i32 = -1;
     let mut inner_idx: i32 = -1;
-    let mut invokes: HashMap<&str, Vec<(i32, i32)>> = HashMap::with_capacity(8);
+    let mut invokes: HashMap<Pubkey, Vec<(i32, i32)>> = HashMap::with_capacity(8);
     let mut result = Vec::with_capacity(4);
 
     for log in logs {
@@ -539,7 +538,9 @@ fn parse_logs(
             } else {
                 inner_idx += 1;
             }
-            invokes.entry(pid).or_default().push((outer_idx, inner_idx));
+            if let Ok(pk) = Pubkey::from_str(pid) {
+                invokes.entry(pk).or_default().push((outer_idx, inner_idx));
+            }
         }
 
         if PROGRAM_DATA_FINDER.find(log.as_bytes()).is_none() {
@@ -557,12 +558,7 @@ fn parse_logs(
             has_create,
             recent_blockhash.as_deref(),
         ) {
-            crate::core::account_dispatcher::fill_accounts_from_transaction_data(
-                &mut e,
-                meta,
-                transaction,
-                &invokes,
-            );
+            crate::core::account_dispatcher::fill_accounts_with_owned_keys(&mut e, meta, transaction, &invokes);
             crate::core::common_filler::fill_data(&mut e, meta, transaction, &invokes);
             result.push(e);
         }

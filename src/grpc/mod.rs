@@ -16,6 +16,7 @@ pub mod filter;
 pub mod instruction_parser; // 增强的 instruction 解析器
 pub mod program_ids;
 pub mod geyser_connect;
+pub(crate) mod log_instr_dedup;
 pub mod subscribe_builder;
 pub mod transaction_meta;
 pub mod types;

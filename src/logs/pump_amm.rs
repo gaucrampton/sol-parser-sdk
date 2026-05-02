@@ -46,6 +46,27 @@ pub mod discriminators {
 /// Base64 查找器预计算 (用于快速定位)
 static BASE64_FINDER: Lazy<memmem::Finder> = Lazy::new(|| memmem::Finder::new(b"Program data: "));
 
+/// 跳过 ASCII 空白后拷贝 base64 前缀（Explorer / 部分日志会在 base64 中插空格）
+#[inline(always)]
+fn copy_b64_skip_ws_prefix(src: &[u8], out: &mut [u8], max_copy: usize) -> Option<usize> {
+    let cap = max_copy.min(out.len());
+    let mut j = 0usize;
+    for &b in src {
+        if b.is_ascii_whitespace() {
+            continue;
+        }
+        if j >= cap {
+            break;
+        }
+        out[j] = b;
+        j += 1;
+    }
+    if j < 12 {
+        return None;
+    }
+    Some(j)
+}
+
 // ============================================================================
 // 零拷贝解析核心 - 使用栈分配
 // ============================================================================
@@ -61,17 +82,21 @@ fn extract_program_data_zero_copy<'a>(log: &'a str, buf: &'a mut [u8; 2048]) -> 
 
     let data_part = &log[pos + 14..];
     let trimmed = data_part.trim();
+    let body = trimmed.as_bytes();
 
-    // Validate input size before decoding (base64: 4 chars -> 3 bytes, so max input = (2048/3)*4 = ~2730 chars)
-    // Add safety margin to prevent base64-simd assertion failures
-    if trimmed.len() > 2700 {
+    if body.len() > 2700 {
         return None;
     }
 
-    // SIMD-accelerated base64 decoding (AVX2/SSE4/NEON)
     use base64_simd::AsOut;
-    let decoded_slice =
-        base64_simd::STANDARD.decode(trimmed.as_bytes(), buf.as_mut().as_out()).ok()?;
+    const COMPACT_CAP: usize = 2730;
+    let decoded_slice = if body.iter().any(|&b| b.is_ascii_whitespace()) {
+        let mut compact = [0u8; COMPACT_CAP];
+        let n = copy_b64_skip_ws_prefix(body, &mut compact, COMPACT_CAP)?;
+        base64_simd::STANDARD.decode(&compact[..n], buf.as_mut().as_out()).ok()?
+    } else {
+        base64_simd::STANDARD.decode(body, buf.as_mut().as_out()).ok()?
+    };
 
     Some(decoded_slice)
 }
@@ -83,20 +108,16 @@ fn extract_discriminator_simd(log: &str) -> Option<u64> {
     let pos = BASE64_FINDER.find(log_bytes)?;
 
     let data_part = &log[pos + 14..];
-    let trimmed = data_part.trim();
+    let body = data_part.trim().as_bytes();
 
-    if trimmed.len() < 12 {
-        return None;
-    }
-
-    // 只解码前16字节以获取 discriminator (SIMD-accelerated)
     use base64_simd::AsOut;
-    let mut buf = [0u8; 12];
-    base64_simd::STANDARD.decode(&trimmed.as_bytes()[..16], buf.as_mut().as_out()).ok()?;
+    let mut compact = [0u8; 24];
+    let n = copy_b64_skip_ws_prefix(body, &mut compact, 16)?;
+    let mut dec = [0u8; 12];
+    base64_simd::STANDARD.decode(&compact[..n], dec.as_mut().as_out()).ok()?;
 
-    // 使用 unsafe 读取 u64 (零拷贝，无边界检查)
     unsafe {
-        let ptr = buf.as_ptr() as *const u64;
+        let ptr = dec.as_ptr() as *const u64;
         Some(ptr.read_unaligned())
     }
 }
