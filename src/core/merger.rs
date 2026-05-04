@@ -165,16 +165,16 @@ fn merge_pumpfun_trade(base: &mut PumpFunTradeEvent, inner: PumpFunTradeEvent) {
         base.fee = inner.fee;
         base.creator_fee_basis_points = inner.creator_fee_basis_points;
         base.creator_fee = inner.creator_fee;
-        base.track_volume = inner.track_volume;
+        base.track_volume |= inner.track_volume;
         base.total_unclaimed_tokens = inner.total_unclaimed_tokens;
         base.total_claimed_tokens = inner.total_claimed_tokens;
         base.current_sol_volume = inner.current_sol_volume;
         base.last_update_timestamp = inner.last_update_timestamp;
         base.ix_name = inner.ix_name;
-        base.mayhem_mode = inner.mayhem_mode;
+        base.mayhem_mode |= inner.mayhem_mode;
         base.cashback_fee_basis_points = inner.cashback_fee_basis_points;
         base.cashback = inner.cashback;
-        base.is_cashback_coin = inner.is_cashback_coin;
+        base.is_cashback_coin |= inner.is_cashback_coin;
     } else {
         put_u64_if_nonzero(&mut base.fee, inner.fee);
         put_u64_if_nonzero(&mut base.creator_fee, inner.creator_fee);

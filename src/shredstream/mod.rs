@@ -3,6 +3,8 @@
 //! 提供从 Jito ShredStream 直接订阅 Solana Entry 数据的能力，
 //! 相比 gRPC 订阅具有更低的延迟（约 50-100ms 优势）。
 //!
+//! 实现拆分：`client` 负责网络与队列；`pump_ix` 为 **Pump 外层指令**零拷贝热路径解析（不克隆 `static_account_keys`、不复制 `CompiledInstruction`）。
+//!
 //! ## 使用示例
 //! ```rust,no_run
 //! use sol_parser_sdk::shredstream::{ShredStreamClient, ShredStreamConfig};
@@ -35,6 +37,7 @@
 
 pub mod client;
 pub mod config;
+pub(crate) mod pump_ix;
 pub mod proto;
 
 pub use client::ShredStreamClient;

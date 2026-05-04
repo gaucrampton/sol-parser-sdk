@@ -238,7 +238,6 @@ fn parse_create_instruction(
     offset += 32;
 
     let creator = read_pubkey(data, offset).unwrap_or_default();
-    offset += 32;
 
     let metadata =
         create_metadata(signature, slot, tx_index, block_time_us.unwrap_or_default(), grpc_recv_us);
@@ -262,7 +261,7 @@ fn parse_create_instruction(
 /// 3 associated_bonding_curve, 4 global, 5 user, 6 system_program, 7 token_program,
 /// 8 associated_token_program, 9 mayhem_program_id, 10 global_params, 11 sol_vault,
 /// 12 mayhem_state, 13 mayhem_token_vault, 14 event_authority, 15 program. 共 16 个账户。
-/// Instruction args (after disc): name, symbol, uri, creator, is_mayhem_mode, is_cashback_enabled (IDL)。
+/// Instruction args (after disc): name, symbol, uri, creator, is_mayhem_mode (`bool`), is_cashback_enabled (`OptionBool` = 1-byte bool on wire)。
 /// Guard: return None when accounts.len() < 16 to avoid index out of bounds (e.g. ALT-loaded tx).
 fn parse_create_v2_instruction(
     data: &[u8],
@@ -306,7 +305,7 @@ fn parse_create_v2_instruction(
     offset += 32;
     let is_mayhem_mode = read_bool(data, offset)?;
     offset += 1;
-    let is_cashback_enabled = read_bool(data, offset).unwrap_or(false);
+    let is_cashback_enabled = read_option_bool_idl(data, offset).unwrap_or(false);
 
     let mint = acc[0];
     let bonding_curve = acc[2];

@@ -16,6 +16,13 @@ pub type AccountGetter<'a> = dyn Fn(usize) -> Pubkey + 'a;
 /// 16 (可选) remaining_account / fee 相关，部分交易存在。
 /// Sell 共 14 个固定账户，部分版本也有 17 个账户时 16 同 buy。
 pub fn fill_trade_accounts(e: &mut PumpFunTradeEvent, get: &AccountGetter<'_>) {
+    // 指令账户 #1 = fee_recipient（IDL）；仅日志路径时常为 default，补全后可与 mayhem/普通池一致，供 sol-trade-sdk 校验。
+    if e.fee_recipient == Pubkey::default() {
+        let fr = get(1);
+        if fr != Pubkey::default() {
+            e.fee_recipient = fr;
+        }
+    }
     if e.user == Pubkey::default() {
         e.user = get(6);
     }
@@ -154,5 +161,23 @@ mod tests {
             Some(account_17),
             "第 17 个账户 (account) 应被填充，gRPC/RPC 路径均走 fill_trade_accounts"
         );
+    }
+
+    #[test]
+    fn fill_trade_accounts_sets_fee_recipient_from_ix_account_1() {
+        let fee = Pubkey::new_from_array([42u8; 32]);
+        let get = |i: usize| -> Pubkey {
+            if i == 1 {
+                fee
+            } else {
+                Pubkey::default()
+            }
+        };
+        let mut e = PumpFunTradeEvent {
+            fee_recipient: Pubkey::default(),
+            ..Default::default()
+        };
+        fill_trade_accounts(&mut e, &get);
+        assert_eq!(e.fee_recipient, fee);
     }
 }
