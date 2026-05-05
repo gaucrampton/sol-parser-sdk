@@ -172,6 +172,27 @@ mod discriminators {
     pub const PUMPFUN_CREATE: u64 = u64::from_le_bytes([27, 114, 169, 77, 222, 235, 99, 118]);
     pub const PUMPFUN_TRADE: u64 = u64::from_le_bytes([189, 219, 127, 211, 78, 230, 97, 238]);
     pub const PUMPFUN_MIGRATE: u64 = u64::from_le_bytes([189, 233, 93, 185, 92, 148, 234, 148]);
+    pub const PUMPFUN_MIGRATE_BONDING_CURVE_CREATOR: u64 =
+        u64::from_le_bytes([155, 167, 104, 220, 213, 108, 243, 3]);
+    // Pump fees (`idls/pump_fees.json` event discriminators)
+    pub const PUMP_FEES_CREATE_FEE_SHARING_CONFIG: u64 =
+        u64::from_le_bytes([133, 105, 170, 200, 184, 116, 251, 88]);
+    pub const PUMP_FEES_INITIALIZE_FEE_CONFIG: u64 =
+        u64::from_le_bytes([89, 138, 244, 230, 10, 56, 226, 126]);
+    pub const PUMP_FEES_RESET_FEE_SHARING_CONFIG: u64 =
+        u64::from_le_bytes([203, 204, 151, 226, 120, 55, 214, 243]);
+    pub const PUMP_FEES_REVOKE_FEE_SHARING_AUTHORITY: u64 =
+        u64::from_le_bytes([114, 23, 101, 60, 14, 190, 153, 62]);
+    pub const PUMP_FEES_TRANSFER_FEE_SHARING_AUTHORITY: u64 =
+        u64::from_le_bytes([124, 143, 198, 245, 77, 184, 8, 236]);
+    pub const PUMP_FEES_UPDATE_ADMIN: u64 =
+        u64::from_le_bytes([225, 152, 171, 87, 246, 63, 66, 234]);
+    pub const PUMP_FEES_UPDATE_FEE_CONFIG: u64 =
+        u64::from_le_bytes([90, 23, 65, 35, 62, 244, 188, 208]);
+    pub const PUMP_FEES_UPDATE_FEE_SHARES: u64 =
+        u64::from_le_bytes([21, 186, 196, 184, 91, 228, 225, 203]);
+    pub const PUMP_FEES_UPSERT_FEE_TIERS: u64 =
+        u64::from_le_bytes([171, 89, 169, 187, 122, 186, 33, 204]);
 
     // PumpSwap discriminators
     pub const PUMPSWAP_BUY: u64 = u64::from_le_bytes([103, 244, 82, 31, 44, 245, 119, 119]);
@@ -344,6 +365,16 @@ pub fn parse_log_optimized(
                             | EventType::PumpFunBuy
                             | EventType::PumpFunSell
                             | EventType::PumpFunBuyExactSolIn
+                            | EventType::PumpFunMigrateBondingCurveCreator
+                            | EventType::PumpFeesCreateFeeSharingConfig
+                            | EventType::PumpFeesInitializeFeeConfig
+                            | EventType::PumpFeesResetFeeSharingConfig
+                            | EventType::PumpFeesRevokeFeeSharingAuthority
+                            | EventType::PumpFeesTransferFeeSharingAuthority
+                            | EventType::PumpFeesUpdateAdmin
+                            | EventType::PumpFeesUpdateFeeConfig
+                            | EventType::PumpFeesUpdateFeeShares
+                            | EventType::PumpFeesUpsertFeeTiers
                             | EventType::PumpSwapBuy
                             | EventType::PumpSwapSell
                             | EventType::PumpSwapCreatePool
@@ -454,9 +485,38 @@ pub fn parse_log_optimized(
         discriminators::PUMPFUN_CREATE => crate::logs::pump::parse_create_from_data(data, metadata),
         discriminators::PUMPFUN_MIGRATE => {
             crate::logs::pump::parse_migrate_from_data(data, metadata)
+        },
+        discriminators::PUMP_FEES_CREATE_FEE_SHARING_CONFIG => {
+            crate::logs::pump_fees::parse_create_fee_sharing_config_from_data(data, metadata)
         }
-
-        // PumpSwap events (cold path)
+        discriminators::PUMP_FEES_INITIALIZE_FEE_CONFIG => {
+            crate::logs::pump_fees::parse_initialize_fee_config_from_data(data, metadata)
+        }
+        discriminators::PUMP_FEES_RESET_FEE_SHARING_CONFIG => {
+            crate::logs::pump_fees::parse_reset_fee_sharing_config_from_data(data, metadata)
+        }
+        discriminators::PUMP_FEES_REVOKE_FEE_SHARING_AUTHORITY => {
+            crate::logs::pump_fees::parse_revoke_fee_sharing_authority_from_data(data, metadata)
+        }
+        discriminators::PUMP_FEES_TRANSFER_FEE_SHARING_AUTHORITY => {
+            crate::logs::pump_fees::parse_transfer_fee_sharing_authority_from_data(data, metadata)
+        }
+        discriminators::PUMP_FEES_UPDATE_ADMIN => {
+            crate::logs::pump_fees::parse_update_admin_from_data(data, metadata)
+        }
+        discriminators::PUMP_FEES_UPDATE_FEE_CONFIG => {
+            crate::logs::pump_fees::parse_update_fee_config_from_data(data, metadata)
+        }
+        discriminators::PUMP_FEES_UPDATE_FEE_SHARES => {
+            crate::logs::pump_fees::parse_update_fee_shares_from_data(data, metadata)
+        }
+        discriminators::PUMP_FEES_UPSERT_FEE_TIERS => {
+            crate::logs::pump_fees::parse_upsert_fee_tiers_from_data(data, metadata)
+        },
+        discriminators::PUMPFUN_MIGRATE_BONDING_CURVE_CREATOR => crate::logs::pump::parse_migrate_bonding_curve_creator_from_data(
+            data,
+            metadata,
+        ),
         discriminators::PUMPSWAP_CREATE_POOL => {
             crate::logs::pump_amm::parse_create_pool_from_data(data, metadata)
         }
@@ -591,6 +651,28 @@ fn discriminator_to_event_type(discriminator: u64) -> Option<EventType> {
         discriminators::PUMPFUN_CREATE => Some(EventType::PumpFunCreate),
         discriminators::PUMPFUN_TRADE => Some(EventType::PumpFunTrade),
         discriminators::PUMPFUN_MIGRATE => Some(EventType::PumpFunMigrate),
+        discriminators::PUMP_FEES_CREATE_FEE_SHARING_CONFIG => {
+            Some(EventType::PumpFeesCreateFeeSharingConfig)
+        }
+        discriminators::PUMP_FEES_INITIALIZE_FEE_CONFIG => {
+            Some(EventType::PumpFeesInitializeFeeConfig)
+        }
+        discriminators::PUMP_FEES_RESET_FEE_SHARING_CONFIG => {
+            Some(EventType::PumpFeesResetFeeSharingConfig)
+        }
+        discriminators::PUMP_FEES_REVOKE_FEE_SHARING_AUTHORITY => {
+            Some(EventType::PumpFeesRevokeFeeSharingAuthority)
+        }
+        discriminators::PUMP_FEES_TRANSFER_FEE_SHARING_AUTHORITY => {
+            Some(EventType::PumpFeesTransferFeeSharingAuthority)
+        }
+        discriminators::PUMP_FEES_UPDATE_ADMIN => Some(EventType::PumpFeesUpdateAdmin),
+        discriminators::PUMP_FEES_UPDATE_FEE_CONFIG => Some(EventType::PumpFeesUpdateFeeConfig),
+        discriminators::PUMP_FEES_UPDATE_FEE_SHARES => Some(EventType::PumpFeesUpdateFeeShares),
+        discriminators::PUMP_FEES_UPSERT_FEE_TIERS => Some(EventType::PumpFeesUpsertFeeTiers),
+        discriminators::PUMPFUN_MIGRATE_BONDING_CURVE_CREATOR => {
+            Some(EventType::PumpFunMigrateBondingCurveCreator)
+        },
         discriminators::PUMPSWAP_BUY => Some(EventType::PumpSwapBuy),
         discriminators::PUMPSWAP_SELL => Some(EventType::PumpSwapSell),
         discriminators::PUMPSWAP_CREATE_POOL => Some(EventType::PumpSwapCreatePool),

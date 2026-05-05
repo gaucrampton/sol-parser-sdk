@@ -12,7 +12,8 @@ use solana_sdk::transaction::VersionedTransaction;
 
 use crate::accounts::program_ids::SPL_TOKEN_2022_PROGRAM_ID;
 use crate::core::events::{
-    DexEvent, EventMetadata, PumpFunCreateTokenEvent, PumpFunCreateV2TokenEvent, PumpFunTradeEvent,
+    DexEvent, EventMetadata, PumpFunCreateTokenEvent, PumpFunCreateV2TokenEvent,
+    PumpFunMigrateBondingCurveCreatorEvent, PumpFunTradeEvent,
 };
 use crate::instr::pump::discriminators;
 use crate::instr::utils::{
@@ -102,8 +103,9 @@ fn detect_pumpfun_create_mints(
     (created_mints, mayhem_mints)
 }
 
+/// Pump.fun 外层或 pump_fees `create_fee_sharing_config` 外层，保持与交易内 ix 顺序一致。
 #[inline]
-fn push_if_pump_outer(
+fn dispatch_shred_outer(
     program_id_index: u8,
     ix_accounts: &[u8],
     data: &[u8],
@@ -119,22 +121,33 @@ fn push_if_pump_outer(
     let Some(program_id) = static_keys.get(program_id_index as usize) else {
         return;
     };
-    if *program_id != PROGRAM_ID_PUBKEY {
+    if *program_id == PROGRAM_ID_PUBKEY {
+        if let Some(ev) = parse_pumpfun_instruction(
+            data,
+            static_keys,
+            ix_accounts,
+            signature,
+            slot,
+            tx_index,
+            recv_us,
+            created_mints,
+            mayhem_mints,
+        ) {
+            events.push(ev);
+        }
         return;
     }
-    if let Some(ev) = parse_pumpfun_instruction(
+    super::pfees_ix::try_push_pump_fees_outer_if_applicable(
+        program_id_index,
         data,
-        static_keys,
         ix_accounts,
+        static_keys,
         signature,
         slot,
         tx_index,
         recv_us,
-        created_mints,
-        mayhem_mints,
-    ) {
-        events.push(ev);
-    }
+        events,
+    );
 }
 
 /// 解析交易中的 Pump 外层指令并写入 `events`（调用前 `events` 应已 `clear` 或按需复用容量）。
@@ -153,7 +166,7 @@ pub(crate) fn parse_transaction_pump_events(
     match &transaction.message {
         VersionedMessage::Legacy(msg) => {
             for ix in &msg.instructions {
-                push_if_pump_outer(
+                dispatch_shred_outer(
                     ix.program_id_index,
                     &ix.accounts,
                     &ix.data,
@@ -170,7 +183,7 @@ pub(crate) fn parse_transaction_pump_events(
         }
         VersionedMessage::V0(msg) => {
             for ix in &msg.instructions {
-                push_if_pump_outer(
+                dispatch_shred_outer(
                     ix.program_id_index,
                     &ix.accounts,
                     &ix.data,
@@ -240,8 +253,60 @@ fn parse_pumpfun_instruction(
             created_mints,
             mayhem_mints,
         ),
+        d if d == discriminators::MIGRATE_BONDING_CURVE_CREATOR => {
+            parse_migrate_bonding_curve_creator_shred(
+                accounts,
+                ix_accounts,
+                signature,
+                slot,
+                tx_index,
+                recv_us,
+            )
+        }
         _ => None,
     }
+}
+
+/// `migrate_bonding_curve_creator` 外层 ix（`idls/pumpfun.json`）；无链上事件体时 `timestamp=0`，
+/// `old_creator` 未知则填默认，`new_creator` 取 `sharing_config` 账户（与常见费分成迁移一致）。
+#[inline]
+fn parse_migrate_bonding_curve_creator_shred(
+    accounts: &[Pubkey],
+    ix_accounts: &[u8],
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    recv_us: i64,
+) -> Option<DexEvent> {
+    const MIN_ACC: usize = 5;
+    if ix_accounts.len() < MIN_ACC {
+        return None;
+    }
+    let get_account = |idx: usize| -> Option<Pubkey> {
+        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
+    };
+    let mint = get_account(0)?;
+    let bonding_curve = get_account(1).unwrap_or_default();
+    let sharing_config = get_account(2).unwrap_or_default();
+    let metadata = EventMetadata {
+        signature,
+        slot,
+        tx_index,
+        block_time_us: 0,
+        grpc_recv_us: recv_us,
+        recent_blockhash: None,
+    };
+    Some(DexEvent::PumpFunMigrateBondingCurveCreator(
+        PumpFunMigrateBondingCurveCreatorEvent {
+            metadata,
+            timestamp: 0,
+            mint,
+            bonding_curve,
+            sharing_config,
+            old_creator: Pubkey::default(),
+            new_creator: sharing_config,
+        },
+    ))
 }
 
 #[inline]

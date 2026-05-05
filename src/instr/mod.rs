@@ -8,6 +8,7 @@ pub mod meteora_dlmm;
 pub mod orca_whirlpool;
 pub mod program_ids;
 pub mod pump;
+pub mod pump_fees;
 pub mod pump_amm;
 pub mod raydium_amm;
 pub mod raydium_clmm;
@@ -21,9 +22,7 @@ pub mod inner_common; // 通用零拷贝读取函数
 pub mod pump_amm_inner; // PumpSwap inner instruction
 pub mod pump_inner; // PumpFun inner instruction
 pub mod raydium_clmm_inner; // Raydium CLMM inner instruction // 其他所有协议的 inner instruction（统一文件）
-use crate::grpc::types::{EventType, EventTypeFilter};
-use crate::logs::perf_hints::unlikely;
-
+use crate::grpc::types::EventTypeFilter;
 // 重新导出主要解析函数
 pub use meteora_damm::parse_instruction as parse_meteora_damm_instruction;
 pub use pump::parse_instruction as parse_pumpfun_instruction;
@@ -52,26 +51,6 @@ pub fn parse_instruction_unified(
     // 快速检查指令数据长度，避免无效解析
     if instruction_data.is_empty() {
         return None;
-    }
-
-    // 提前过滤和解析
-    if let Some(filter) = event_type_filter {
-        if let Some(ref include_only) = filter.include_only {
-            let should_parse = include_only.iter().any(|t| {
-                matches!(
-                    t,
-                    EventType::PumpFunMigrate
-                        | EventType::MeteoraDammV2Swap
-                        | EventType::MeteoraDammV2AddLiquidity
-                        | EventType::MeteoraDammV2CreatePosition
-                        | EventType::MeteoraDammV2ClosePosition
-                        | EventType::MeteoraDammV2RemoveLiquidity
-                )
-            });
-            if unlikely(!should_parse) {
-                return None;
-            }
-        }
     }
 
     // 根据程序 ID 路由到相应的解析器，按使用频率排序
@@ -111,6 +90,21 @@ pub fn parse_instruction_unified(
             return None;
         }
         return parse_meteora_damm_instruction(
+            instruction_data,
+            accounts,
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+            grpc_recv_us,
+        );
+    }
+    // Pump fees (`pfeeUx...`)
+    else if *program_id == PUMP_FEES_PROGRAM_ID {
+        if event_type_filter.is_some() && !event_type_filter.unwrap().includes_pump_fees() {
+            return None;
+        }
+        return crate::instr::pump_fees::parse_instruction(
             instruction_data,
             accounts,
             signature,

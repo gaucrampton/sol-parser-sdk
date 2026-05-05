@@ -16,6 +16,9 @@ pub const BONK_PROGRAM_ID: Pubkey = pubkey!("DjVE6JNiYqPL2QXyCUUh8rNjHrbz9hXHNYt
 /// PumpSwap program ID as Pubkey constant
 pub const PUMPSWAP_PROGRAM_ID: Pubkey = pubkey!("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
 
+/// Pump Fees (`pump_fees`) program — 见 `idls/pump_fees.json`
+pub const PUMP_FEES_PROGRAM_ID: Pubkey = pubkey!("pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ");
+
 /// Raydium CLMM program ID as Pubkey constant
 /// Note: Original string was too long, using corrected version
 pub const RAYDIUM_CLMM_PROGRAM_ID: Pubkey = pubkey!("CAMMCzo5YL8w4VFF8KVHrK22GGUQpMDdHFWF5LCATdCR");

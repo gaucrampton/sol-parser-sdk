@@ -1,4 +1,8 @@
 //! ShredStream 客户端
+//!
+//! `solana_entry::entry::Entry` 在 Agave SDK 中带 `deprecated`（需显式启用不稳定 feature 才消除）；
+//! 本模块仍依赖其 bincode 布局解码 Shred 侧 `entries` 负载。
+#![allow(deprecated)]
 
 use std::sync::Arc;
 

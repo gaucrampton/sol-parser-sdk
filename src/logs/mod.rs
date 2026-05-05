@@ -15,6 +15,7 @@ pub mod optimized_matcher;
 pub mod orca_whirlpool;
 pub mod perf_hints;
 pub mod pump;
+pub mod pump_fees;
 pub mod pump_amm;
 pub mod raydium_amm;
 pub mod raydium_clmm;

@@ -249,6 +249,18 @@ pub enum EventType {
     PumpFunCreateV2, // SPL-22 / Mayhem create
     PumpFunComplete,
     PumpFunMigrate,
+    /// Pump fees（`pfeeUx...`，`idls/pump_fees.json` Program data events）
+    PumpFeesCreateFeeSharingConfig,
+    PumpFeesInitializeFeeConfig,
+    PumpFeesResetFeeSharingConfig,
+    PumpFeesRevokeFeeSharingAuthority,
+    PumpFeesTransferFeeSharingAuthority,
+    PumpFeesUpdateAdmin,
+    PumpFeesUpdateFeeConfig,
+    PumpFeesUpdateFeeShares,
+    PumpFeesUpsertFeeTiers,
+    /// Pump.fun：`migrateBondingCurveCreatorEvent`
+    PumpFunMigrateBondingCurveCreator,
 
     // PumpSwap events
     PumpSwapBuy,
@@ -374,6 +386,16 @@ impl EventTypeFilter {
                         | EventType::PumpFunCreateV2
                         | EventType::PumpFunComplete
                         | EventType::PumpFunMigrate
+                        | EventType::PumpFeesCreateFeeSharingConfig
+                        | EventType::PumpFeesInitializeFeeConfig
+                        | EventType::PumpFeesResetFeeSharingConfig
+                        | EventType::PumpFeesRevokeFeeSharingAuthority
+                        | EventType::PumpFeesTransferFeeSharingAuthority
+                        | EventType::PumpFeesUpdateAdmin
+                        | EventType::PumpFeesUpdateFeeConfig
+                        | EventType::PumpFeesUpdateFeeShares
+                        | EventType::PumpFeesUpsertFeeTiers
+                        | EventType::PumpFunMigrateBondingCurveCreator
                 )
             });
         }
@@ -390,6 +412,16 @@ impl EventTypeFilter {
                         | EventType::PumpFunCreateV2
                         | EventType::PumpFunComplete
                         | EventType::PumpFunMigrate
+                        | EventType::PumpFeesCreateFeeSharingConfig
+                        | EventType::PumpFeesInitializeFeeConfig
+                        | EventType::PumpFeesResetFeeSharingConfig
+                        | EventType::PumpFeesRevokeFeeSharingAuthority
+                        | EventType::PumpFeesTransferFeeSharingAuthority
+                        | EventType::PumpFeesUpdateAdmin
+                        | EventType::PumpFeesUpdateFeeConfig
+                        | EventType::PumpFeesUpdateFeeShares
+                        | EventType::PumpFeesUpsertFeeTiers
+                        | EventType::PumpFunMigrateBondingCurveCreator
                 )
             });
         }
@@ -422,6 +454,30 @@ impl EventTypeFilter {
                         | EventType::MeteoraDammV2RemoveLiquidity
                 )
             });
+        }
+        true
+    }
+
+    #[inline]
+    pub fn includes_pump_fees(&self) -> bool {
+        macro_rules! any_pfees {
+            () => {
+                EventType::PumpFeesCreateFeeSharingConfig
+                    | EventType::PumpFeesInitializeFeeConfig
+                    | EventType::PumpFeesResetFeeSharingConfig
+                    | EventType::PumpFeesRevokeFeeSharingAuthority
+                    | EventType::PumpFeesTransferFeeSharingAuthority
+                    | EventType::PumpFeesUpdateAdmin
+                    | EventType::PumpFeesUpdateFeeConfig
+                    | EventType::PumpFeesUpdateFeeShares
+                    | EventType::PumpFeesUpsertFeeTiers
+            };
+        }
+        if let Some(ref include_only) = self.include_only {
+            return include_only.iter().any(|t| matches!(t, any_pfees!()));
+        }
+        if let Some(ref exclude_types) = self.exclude_types {
+            return !exclude_types.iter().any(|t| matches!(t, any_pfees!()));
         }
         true
     }

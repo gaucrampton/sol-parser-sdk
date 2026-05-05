@@ -3,7 +3,9 @@
 //! 提供从 Jito ShredStream 直接订阅 Solana Entry 数据的能力，
 //! 相比 gRPC 订阅具有更低的延迟（约 50-100ms 优势）。
 //!
-//! 实现拆分：`client` 负责网络与队列；`pump_ix` 为 **Pump 外层指令**零拷贝热路径解析（不克隆 `static_account_keys`、不复制 `CompiledInstruction`）。
+//! 实现拆分：`client` 负责网络与队列；`pump_ix` 为 **Pump.fun 外层**指令热路径；
+//! `pfees_ix` 为 **Pump Fees（`pfee...`）** 外层指令热路径，**仅** `update_fee_shares` 会解析并入队（见 `pfees_ix` 模块说明）。两者遍历同一笔交易的
+//! outer ix 队列，以保持事件顺序与交易一致。
 //!
 //! ## 使用示例
 //! ```rust,no_run
@@ -37,6 +39,7 @@
 
 pub mod client;
 pub mod config;
+pub(crate) mod pfees_ix;
 pub(crate) mod pump_ix;
 pub mod proto;
 

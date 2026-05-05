@@ -1,131 +1,57 @@
-//! PumpFun 极限优化解析器 - 微秒/纳秒级性能
-//!
-//! 优化策略:
-//! - 零拷贝解析 (zero-copy)
-//! - 栈分配替代堆分配
-//! - unsafe 消除边界检查
-//! - 编译器自动向量化 (target-cpu=native)
-//! - 内联所有热路径
-//! - 编译时计算
-//! - 内存预取 (CPU cache optimization)
+//! Pump.fun `Program log` → [`DexEvent`](crate::core::events::DexEvent) (SIMD / zero-copy hot path).
+#![allow(dead_code)]
+#![allow(unused_imports)]
+#![allow(unused_variables)]
+
 
 use crate::core::events::*;
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
+
 use memchr::memmem;
 use once_cell::sync::Lazy;
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 #[cfg(feature = "perf-stats")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-// ============================================================================
-// 性能计数器 (可选，用于性能分析)
-// ============================================================================
 
 #[cfg(feature = "perf-stats")]
 pub static PARSE_COUNT: AtomicUsize = AtomicUsize::new(0);
 #[cfg(feature = "perf-stats")]
 pub static PARSE_TIME_NS: AtomicUsize = AtomicUsize::new(0);
 
-// ============================================================================
-// 编译时常量和查找表
-// ============================================================================
+// --- discriminators ------------------------------------------------
 
-/// PumpFun discriminator 常量 (编译时计算)
-pub mod discriminators {
-    pub const CREATE_EVENT: u64 = u64::from_le_bytes([27, 114, 169, 77, 222, 235, 99, 118]);
-    pub const TRADE_EVENT: u64 = u64::from_le_bytes([189, 219, 127, 211, 78, 230, 97, 238]);
-    pub const MIGRATE_EVENT: u64 = u64::from_le_bytes([189, 233, 93, 185, 92, 148, 234, 148]);
-}
+pub const CREATE_EVENT: u64 = u64::from_le_bytes([27, 114, 169, 77, 222, 235, 99, 118]);
+pub const TRADE_EVENT: u64 = u64::from_le_bytes([189, 219, 127, 211, 78, 230, 97, 238]);
+pub const MIGRATE_EVENT: u64 = u64::from_le_bytes([189, 233, 93, 185, 92, 148, 234, 148]);
+/// `createFeeSharingConfigEvent`（pump-fees IDL）
+pub const CREATE_FEE_SHARING_CONFIG_EVENT: u64 =
+    crate::logs::pump_fees::discriminant_u64(&crate::logs::pump_fees::CREATE_FEE_SHARING_CONFIG_EVENT_DISC);
+/// `migrateBondingCurveCreatorEvent`（pump.fun IDL）
+pub const MIGRATE_BONDING_CURVE_CREATOR_EVENT: u64 =
+    u64::from_le_bytes([155, 167, 104, 220, 213, 108, 243, 3]);
 
-/// Base64 查找表预计算 (用于快速解码)
-static BASE64_FINDER: Lazy<memmem::Finder> = Lazy::new(|| memmem::Finder::new(b"Program data: "));
+// --- binary_read ---------------------------------------------------
 
-// ============================================================================
-// 零拷贝解析核心 - 使用栈分配
-// ============================================================================
-
-/// 零拷贝提取 program data (栈分配，无堆分配)
-///
-/// 优化: 使用固定大小栈缓冲区，避免 Vec 分配
-/// 缓冲区大小增加到 2KB 以防止 base64-simd 缓冲区溢出panic
 #[inline(always)]
-fn extract_program_data_zero_copy<'a>(log: &'a str, buf: &'a mut [u8; 2048]) -> Option<&'a [u8]> {
-    let log_bytes = log.as_bytes();
-    let pos = BASE64_FINDER.find(log_bytes)?;
-
-    let data_part = &log[pos + 14..];
-    let trimmed = data_part.trim();
-
-    // Validate input size before decoding (base64: 4 chars -> 3 bytes, so max input = (2048/3)*4 = ~2730 chars)
-    // Add safety margin to prevent base64-simd assertion failures
-    if trimmed.len() > 2700 {
-        return None;
-    }
-
-    // SIMD-accelerated base64 decoding (AVX2/SSE4/NEON)
-    use base64_simd::AsOut;
-    let decoded_slice =
-        base64_simd::STANDARD.decode(trimmed.as_bytes(), buf.as_mut().as_out()).ok()?;
-
-    Some(decoded_slice)
-}
-
-/// 快速 discriminator 提取 (SIMD 优化)
-#[inline(always)]
-fn extract_discriminator_simd(log: &str) -> Option<u64> {
-    let log_bytes = log.as_bytes();
-    let pos = BASE64_FINDER.find(log_bytes)?;
-
-    let data_part = &log[pos + 14..];
-    let trimmed = data_part.trim();
-
-    if trimmed.len() < 12 {
-        return None;
-    }
-
-    // 只解码前16字节以获取 discriminator (SIMD-accelerated)
-    use base64_simd::AsOut;
-    let mut buf = [0u8; 12];
-    base64_simd::STANDARD.decode(&trimmed.as_bytes()[..16], buf.as_mut().as_out()).ok()?;
-
-    // 使用 unsafe 读取 u64 (零拷贝，无边界检查)
-    unsafe {
-        let ptr = buf.as_ptr() as *const u64;
-        Some(ptr.read_unaligned())
-    }
-}
-
-// ============================================================================
-// Unsafe 读取函数 - 消除边界检查
-// ============================================================================
-
-/// 读取 u64 (unsafe, 无边界检查)
-#[inline(always)]
-unsafe fn read_u64_unchecked(data: &[u8], offset: usize) -> u64 {
+pub unsafe fn read_u64_unchecked(data: &[u8], offset: usize) -> u64 {
     let ptr = data.as_ptr().add(offset) as *const u64;
     u64::from_le(ptr.read_unaligned())
 }
 
-/// 读取 i64 (unsafe, 无边界检查)
 #[inline(always)]
-unsafe fn read_i64_unchecked(data: &[u8], offset: usize) -> i64 {
+pub unsafe fn read_i64_unchecked(data: &[u8], offset: usize) -> i64 {
     let ptr = data.as_ptr().add(offset) as *const i64;
     i64::from_le(ptr.read_unaligned())
 }
 
-/// 读取 bool (unsafe, 无边界检查)
 #[inline(always)]
-unsafe fn read_bool_unchecked(data: &[u8], offset: usize) -> bool {
+pub unsafe fn read_bool_unchecked(data: &[u8], offset: usize) -> bool {
     *data.get_unchecked(offset) == 1
 }
 
-/// 读取 Pubkey (unsafe, 无边界检查)
-///
-/// 优化: 添加内存预取，假设连续读取多个 Pubkey
 #[inline(always)]
-unsafe fn read_pubkey_unchecked(data: &[u8], offset: usize) -> Pubkey {
-    // 预取下一个可能的 Pubkey 位置 (假设连续读取)
-    // 使用 T0 提示 (最高优先级) 将数据预取到 L1 cache
+pub unsafe fn read_pubkey_unchecked(data: &[u8], offset: usize) -> Pubkey {
     #[cfg(target_arch = "x86_64")]
     {
         use std::arch::x86_64::_mm_prefetch;
@@ -141,11 +67,8 @@ unsafe fn read_pubkey_unchecked(data: &[u8], offset: usize) -> Pubkey {
     Pubkey::new_from_array(bytes)
 }
 
-/// 读取 u32 长度前缀的字符串 (零拷贝，返回 &str)
-///
-/// 优化: 直接返回 &str，避免 String 分配
 #[inline(always)]
-unsafe fn read_str_unchecked(data: &[u8], offset: usize) -> Option<(&str, usize)> {
+pub unsafe fn read_str_unchecked(data: &[u8], offset: usize) -> Option<(&str, usize)> {
     if data.len() < offset + 4 {
         return None;
     }
@@ -160,17 +83,60 @@ unsafe fn read_str_unchecked(data: &[u8], offset: usize) -> Option<(&str, usize)
     Some((s, 4 + len))
 }
 
-/// 读取 u32 (unsafe, 无边界检查)
 #[inline(always)]
-unsafe fn read_u32_unchecked(data: &[u8], offset: usize) -> u32 {
+pub unsafe fn read_u32_unchecked(data: &[u8], offset: usize) -> u32 {
     let ptr = data.as_ptr().add(offset) as *const u32;
     u32::from_le(ptr.read_unaligned())
 }
 
-// ============================================================================
-// 极限优化的事件解析函数
-// ============================================================================
+// --- log_decode ----------------------------------------------------
 
+static BASE64_FINDER: Lazy<memmem::Finder> = Lazy::new(|| memmem::Finder::new(b"Program data: "));
+/// `b"Program data: "`.len() — base64 payload starts immediately after this tag.
+const PROGRAM_DATA_TAG_LEN: usize = 14;
+
+#[inline(always)]
+pub fn extract_program_data_zero_copy<'a>(log: &'a str, buf: &'a mut [u8; 2048]) -> Option<&'a [u8]> {
+    let log_bytes = log.as_bytes();
+    let pos = BASE64_FINDER.find(log_bytes)?;
+
+    let data_part = &log[pos + PROGRAM_DATA_TAG_LEN..];
+    let trimmed = data_part.trim();
+
+    if trimmed.len() > 2700 {
+        return None;
+    }
+
+    use base64_simd::AsOut;
+    let decoded_slice =
+        base64_simd::STANDARD.decode(trimmed.as_bytes(), buf.as_mut().as_out()).ok()?;
+
+    Some(decoded_slice)
+}
+
+#[inline(always)]
+pub fn extract_discriminator_simd(log: &str) -> Option<u64> {
+    let log_bytes = log.as_bytes();
+    let pos = BASE64_FINDER.find(log_bytes)?;
+
+    let data_part = &log[pos + PROGRAM_DATA_TAG_LEN..];
+    let trimmed = data_part.trim();
+
+    if trimmed.len() < 12 {
+        return None;
+    }
+
+    use base64_simd::AsOut;
+    let mut buf = [0u8; 12];
+    base64_simd::STANDARD.decode(&trimmed.as_bytes()[..16], buf.as_mut().as_out()).ok()?;
+
+    unsafe {
+        let ptr = buf.as_ptr() as *const u64;
+        Some(ptr.read_unaligned())
+    }
+}
+
+// --- main parser ---------------------------------------------------
 /// 主解析函数 (极限优化版本)
 ///
 /// 性能目标: <100ns
@@ -200,7 +166,7 @@ pub fn parse_log(
     let data = &program_data[8..];
 
     let result = match discriminator {
-        discriminators::CREATE_EVENT => parse_create_event_optimized(
+        CREATE_EVENT => parse_create_event_optimized(
             data,
             signature,
             slot,
@@ -208,7 +174,7 @@ pub fn parse_log(
             block_time_us,
             grpc_recv_us,
         ),
-        discriminators::TRADE_EVENT => parse_trade_event_optimized(
+        TRADE_EVENT => parse_trade_event_optimized(
             data,
             signature,
             slot,
@@ -217,7 +183,7 @@ pub fn parse_log(
             grpc_recv_us,
             is_created_buy,
         ),
-        discriminators::MIGRATE_EVENT => parse_migrate_event_optimized(
+        MIGRATE_EVENT => parse_migrate_event_optimized(
             data,
             signature,
             slot,
@@ -225,6 +191,24 @@ pub fn parse_log(
             block_time_us,
             grpc_recv_us,
         ),
+        CREATE_FEE_SHARING_CONFIG_EVENT => parse_create_fee_sharing_config_event_optimized(
+            data,
+            signature,
+            slot,
+            tx_index,
+            block_time_us,
+            grpc_recv_us,
+        ),
+        MIGRATE_BONDING_CURVE_CREATOR_EVENT => {
+            parse_migrate_bonding_curve_creator_event_optimized(
+                data,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+                grpc_recv_us,
+            )
+        },
         _ => None,
     };
 
@@ -577,6 +561,46 @@ fn parse_migrate_event_optimized(
             pool,
         }))
     }
+}
+
+#[inline(always)]
+fn parse_migrate_bonding_curve_creator_event_optimized(
+    data: &[u8],
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    block_time_us: Option<i64>,
+    grpc_recv_us: i64,
+) -> Option<DexEvent> {
+    let metadata = EventMetadata {
+        signature,
+        slot,
+        tx_index,
+        block_time_us: block_time_us.unwrap_or(0),
+        grpc_recv_us,
+        recent_blockhash: None,
+    };
+    parse_migrate_bonding_curve_creator_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_create_fee_sharing_config_event_optimized(
+    data: &[u8],
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    block_time_us: Option<i64>,
+    grpc_recv_us: i64,
+) -> Option<DexEvent> {
+    let metadata = EventMetadata {
+        signature,
+        slot,
+        tx_index,
+        block_time_us: block_time_us.unwrap_or(0),
+        grpc_recv_us,
+        recent_blockhash: None,
+    };
+    crate::logs::pump_fees::parse_create_fee_sharing_config_from_data(data, metadata)
 }
 
 // ============================================================================
@@ -935,6 +959,97 @@ pub fn parse_migrate_from_data(data: &[u8], metadata: EventMetadata) -> Option<D
     }
 }
 
+/// `migrateBondingCurveCreatorEvent`：`data` 为去掉 8 字节 discriminator 之后的 Borsh 体。
+#[inline(always)]
+pub fn parse_migrate_bonding_curve_creator_from_data(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    unsafe {
+        const NEED: usize = 8 + 32 * 5;
+        if data.len() < NEED {
+            return None;
+        }
+
+        let mut offset = 0usize;
+        let timestamp = read_i64_unchecked(data, offset);
+        offset += 8;
+        let mint = read_pubkey_unchecked(data, offset);
+        offset += 32;
+        let bonding_curve = read_pubkey_unchecked(data, offset);
+        offset += 32;
+        let sharing_config = read_pubkey_unchecked(data, offset);
+        offset += 32;
+        let old_creator = read_pubkey_unchecked(data, offset);
+        offset += 32;
+        let new_creator = read_pubkey_unchecked(data, offset);
+
+        Some(DexEvent::PumpFunMigrateBondingCurveCreator(
+            PumpFunMigrateBondingCurveCreatorEvent {
+                metadata,
+                timestamp,
+                mint,
+                bonding_curve,
+                sharing_config,
+                old_creator,
+                new_creator,
+            },
+        ))
+    }
+}
+
+/// `createFeeSharingConfigEvent`：委托 [`pump_fees::parse_create_fee_sharing_config_from_data`](crate::logs::pump_fees)。
+#[inline]
+pub fn parse_create_fee_sharing_config_from_data(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_create_fee_sharing_config_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn read_i64_at(data: &[u8], o: &mut usize) -> Option<i64> {
+    if data.len() < *o + 8 {
+        return None;
+    }
+    let v =
+        i64::from_le_bytes(data[*o..*o + 8].try_into().ok()?);
+    *o += 8;
+    Some(v)
+}
+
+#[inline(always)]
+fn read_u16_at(data: &[u8], o: &mut usize) -> Option<u16> {
+    if data.len() < *o + 2 {
+        return None;
+    }
+    let v =
+        u16::from_le_bytes(data[*o..*o + 2].try_into().ok()?);
+    *o += 2;
+    Some(v)
+}
+
+#[inline(always)]
+fn read_u32_at(data: &[u8], o: &mut usize) -> Option<u32> {
+    if data.len() < *o + 4 {
+        return None;
+    }
+    let v =
+        u32::from_le_bytes(data[*o..*o + 4].try_into().ok()?);
+    *o += 4;
+    Some(v)
+}
+
+#[inline(always)]
+fn read_pubkey_at(data: &[u8], o: &mut usize) -> Option<Pubkey> {
+    if data.len() < *o + 32 {
+        return None;
+    }
+    let pk = Pubkey::new_from_array(data[*o..*o + 32].try_into().ok()?);
+    *o += 32;
+    Some(pk)
+}
+
 // ============================================================================
 // 性能统计 API (可选)
 // ============================================================================
@@ -955,6 +1070,7 @@ pub fn reset_perf_stats() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::events::{DexEvent, EventMetadata};
 
     #[test]
     fn test_discriminator_simd() {
@@ -978,4 +1094,45 @@ mod tests {
 
         println!("Average parse time: {} ns", elapsed.as_nanos() / 1000);
     }
+
+    #[test]
+    fn migrate_bonding_curve_creator_roundtrip_from_data() {
+        let ts: i64 = 1_777_920_719;
+        let mint = Pubkey::new_unique();
+        let bonding_curve = Pubkey::new_unique();
+        let sharing_config = Pubkey::new_unique();
+        let old_creator = Pubkey::new_unique();
+        let new_creator = Pubkey::new_unique();
+
+        let mut buf = Vec::with_capacity(200);
+        buf.extend_from_slice(&ts.to_le_bytes());
+        buf.extend_from_slice(mint.as_ref());
+        buf.extend_from_slice(bonding_curve.as_ref());
+        buf.extend_from_slice(sharing_config.as_ref());
+        buf.extend_from_slice(old_creator.as_ref());
+        buf.extend_from_slice(new_creator.as_ref());
+
+        let metadata = EventMetadata {
+            signature: Signature::default(),
+            slot: 0,
+            tx_index: 0,
+            block_time_us: 0,
+            grpc_recv_us: 0,
+            recent_blockhash: None,
+        };
+
+        let ev = parse_migrate_bonding_curve_creator_from_data(&buf, metadata).expect("parse");
+        match ev {
+            DexEvent::PumpFunMigrateBondingCurveCreator(e) => {
+                assert_eq!(e.timestamp, ts);
+                assert_eq!(e.mint, mint);
+                assert_eq!(e.bonding_curve, bonding_curve);
+                assert_eq!(e.sharing_config, sharing_config);
+                assert_eq!(e.old_creator, old_creator);
+                assert_eq!(e.new_creator, new_creator);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
 }

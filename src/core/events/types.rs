@@ -149,7 +149,7 @@ pub struct PumpFunTradeEvent {
     pub account: Option<Pubkey>,
 }
 
-/// PumpFun Migrate Event
+/// PumpFun Migrate Event — bonding curve 完成向池子（如 Pump AMM/Raydium）迁移等
 #[derive(Debug, Clone, Serialize, Deserialize, Default, BorshDeserialize)]
 pub struct PumpFunMigrateEvent {
     #[borsh(skip)]
@@ -177,6 +177,159 @@ pub struct PumpFunMigrateEvent {
     // pub user_pool_token_account: Pubkey,
     // pub pool_base_token_account: Pubkey,
     // pub pool_quote_token_account: Pubkey,
+}
+
+// ---------- pump-fees IDL：`idls/pump_fees.json`（Program `pfeeUx...`）----------
+
+/// IDL `Shareholder`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PumpFeesShareholder {
+    pub address: Pubkey,
+    pub share_bps: u16,
+}
+
+/// IDL `ConfigStatus`（Anchor Borsh：enum 判别）
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum PumpFeesConfigStatus {
+    Paused,
+    Active,
+}
+
+/// IDL `Fees`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PumpFeesFees {
+    pub lp_fee_bps: u64,
+    pub protocol_fee_bps: u64,
+    pub creator_fee_bps: u64,
+}
+
+/// IDL `FeeTier`
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PumpFeesFeeTier {
+    pub market_cap_lamports_threshold: u128,
+    pub fees: PumpFeesFees,
+}
+
+/// IDL `CreateFeeSharingConfigEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesCreateFeeSharingConfigEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub mint: Pubkey,
+    pub bonding_curve: Pubkey,
+    pub pool: Option<Pubkey>,
+    pub sharing_config: Pubkey,
+    pub admin: Pubkey,
+    pub initial_shareholders: Vec<PumpFeesShareholder>,
+    pub status: PumpFeesConfigStatus,
+}
+
+/// IDL `InitializeFeeConfigEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesInitializeFeeConfigEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub admin: Pubkey,
+    pub fee_config: Pubkey,
+}
+
+/// IDL `ResetFeeSharingConfigEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesResetFeeSharingConfigEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub mint: Pubkey,
+    pub sharing_config: Pubkey,
+    pub old_admin: Pubkey,
+    pub old_shareholders: Vec<PumpFeesShareholder>,
+    pub new_admin: Pubkey,
+    pub new_shareholders: Vec<PumpFeesShareholder>,
+}
+
+/// IDL `RevokeFeeSharingAuthorityEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesRevokeFeeSharingAuthorityEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub mint: Pubkey,
+    pub sharing_config: Pubkey,
+    pub admin: Pubkey,
+}
+
+/// IDL `TransferFeeSharingAuthorityEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesTransferFeeSharingAuthorityEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub mint: Pubkey,
+    pub sharing_config: Pubkey,
+    pub old_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+/// IDL `UpdateAdminEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesUpdateAdminEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub old_admin: Pubkey,
+    pub new_admin: Pubkey,
+}
+
+/// IDL `UpdateFeeConfigEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesUpdateFeeConfigEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub admin: Pubkey,
+    pub fee_config: Pubkey,
+    pub fee_tiers: Vec<PumpFeesFeeTier>,
+    pub flat_fees: PumpFeesFees,
+}
+
+/// IDL `UpdateFeeSharesEvent`
+///
+/// 链上 **`update_fee_shares` 指令**还会在账户列表中带上 `bonding_curve`、`pump_creator_vault`
+/// （Explorer #7/#8，`Program data` 日志体不含这两字段 ⇒ 仍为 `default`）。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesUpdateFeeSharesEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub mint: Pubkey,
+    pub sharing_config: Pubkey,
+    pub admin: Pubkey,
+    /// IDL：`bonding_curve`（ix 账户约 #7；Explorer `#7`）。
+    #[serde(default)]
+    pub bonding_curve: Pubkey,
+    /// **`pump_creator_vault`**：`creator-vault` PDA(seed 含 sharing_config)，ix 账户约 #8（Explorer `#8`）。
+    #[serde(default)]
+    pub pump_creator_vault: Pubkey,
+    pub new_shareholders: Vec<PumpFeesShareholder>,
+}
+
+/// IDL `UpsertFeeTiersEvent`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFeesUpsertFeeTiersEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub admin: Pubkey,
+    pub fee_config: Pubkey,
+    pub fee_tiers: Vec<PumpFeesFeeTier>,
+    pub offset: u8,
+}
+
+/// Pump.fun：曲线 creator 迁移（与费分成 onboarding 同框常见）
+///
+/// **`new_creator` 常为后续 `tradeEvent.creator`、`creator_vault` PDA 种子。**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PumpFunMigrateBondingCurveCreatorEvent {
+    pub metadata: EventMetadata,
+    pub timestamp: i64,
+    pub mint: Pubkey,
+    pub bonding_curve: Pubkey,
+    pub sharing_config: Pubkey,
+    pub old_creator: Pubkey,
+    pub new_creator: Pubkey,
 }
 
 /// PumpFun Create Token Event - Based on IDL CreateEvent definition

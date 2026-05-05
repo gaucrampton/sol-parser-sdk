@@ -16,8 +16,18 @@ pub enum DexEvent {
     PumpFunSell(PumpFunTradeEvent),             // - 已对接 (仅卖出事件，用于过滤)
     PumpFunBuyExactSolIn(PumpFunTradeEvent),    // - 已对接 (精确SOL买入事件，用于过滤)
     PumpFunMigrate(PumpFunMigrateEvent),        // - 已对接
-
-    // PumpSwap 事件
+    /// Pump fees：`CreateFeeSharingConfigEvent`（`pfeeUx...`，见 `idls/pump_fees.json`）
+    PumpFeesCreateFeeSharingConfig(PumpFeesCreateFeeSharingConfigEvent),
+    PumpFeesInitializeFeeConfig(PumpFeesInitializeFeeConfigEvent),
+    PumpFeesResetFeeSharingConfig(PumpFeesResetFeeSharingConfigEvent),
+    PumpFeesRevokeFeeSharingAuthority(PumpFeesRevokeFeeSharingAuthorityEvent),
+    PumpFeesTransferFeeSharingAuthority(PumpFeesTransferFeeSharingAuthorityEvent),
+    PumpFeesUpdateAdmin(PumpFeesUpdateAdminEvent),
+    PumpFeesUpdateFeeConfig(PumpFeesUpdateFeeConfigEvent),
+    PumpFeesUpdateFeeShares(PumpFeesUpdateFeeSharesEvent),
+    PumpFeesUpsertFeeTiers(PumpFeesUpsertFeeTiersEvent),
+    /// Pump.fun：曲线 creator 迁移（`migrateBondingCurveCreatorEvent`）
+    PumpFunMigrateBondingCurveCreator(PumpFunMigrateBondingCurveCreatorEvent),
     PumpSwapTrade(PumpSwapTradeEvent), // - 已对接 (buy/sell/buy_exact_sol_in)
     PumpSwapBuy(PumpSwapBuyEvent),     // - 已对接 (legacy)
     PumpSwapSell(PumpSwapSellEvent),   // - 已对接 (legacy)
@@ -120,6 +130,16 @@ impl DexEvent {
             DexEvent::PumpFunSell(e) => &e.metadata,
             DexEvent::PumpFunBuyExactSolIn(e) => &e.metadata,
             DexEvent::PumpFunMigrate(e) => &e.metadata,
+            DexEvent::PumpFeesCreateFeeSharingConfig(e) => &e.metadata,
+            DexEvent::PumpFeesInitializeFeeConfig(e) => &e.metadata,
+            DexEvent::PumpFeesResetFeeSharingConfig(e) => &e.metadata,
+            DexEvent::PumpFeesRevokeFeeSharingAuthority(e) => &e.metadata,
+            DexEvent::PumpFeesTransferFeeSharingAuthority(e) => &e.metadata,
+            DexEvent::PumpFeesUpdateAdmin(e) => &e.metadata,
+            DexEvent::PumpFeesUpdateFeeConfig(e) => &e.metadata,
+            DexEvent::PumpFeesUpdateFeeShares(e) => &e.metadata,
+            DexEvent::PumpFeesUpsertFeeTiers(e) => &e.metadata,
+            DexEvent::PumpFunMigrateBondingCurveCreator(e) => &e.metadata,
 
             // PumpSwap 事件
             DexEvent::PumpSwapTrade(e) => &e.metadata,
@@ -213,6 +233,16 @@ impl DexEvent {
             DexEvent::PumpFunSell(e) => Some(&mut e.metadata),
             DexEvent::PumpFunBuyExactSolIn(e) => Some(&mut e.metadata),
             DexEvent::PumpFunMigrate(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesCreateFeeSharingConfig(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesInitializeFeeConfig(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesResetFeeSharingConfig(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesRevokeFeeSharingAuthority(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesTransferFeeSharingAuthority(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesUpdateAdmin(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesUpdateFeeConfig(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesUpdateFeeShares(e) => Some(&mut e.metadata),
+            DexEvent::PumpFeesUpsertFeeTiers(e) => Some(&mut e.metadata),
+            DexEvent::PumpFunMigrateBondingCurveCreator(e) => Some(&mut e.metadata),
             DexEvent::PumpSwapTrade(e) => Some(&mut e.metadata),
             DexEvent::PumpSwapBuy(e) => Some(&mut e.metadata),
             DexEvent::PumpSwapSell(e) => Some(&mut e.metadata),

@@ -359,6 +359,10 @@ fn should_parse_instructions(filter: Option<&EventTypeFilter>) -> bool {
         return true;
     }
 
+    if filter.includes_pump_fees() {
+        return true;
+    }
+
     // 其它协议：按需解析
     include_only.iter().any(|t| {
         use crate::grpc::types::EventType::*;

@@ -25,6 +25,7 @@ pub struct DiscriminatorInfo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Protocol {
     PumpFun,
+    PumpFees,
     PumpSwap,
     RaydiumClmm,
     RaydiumCpmm,
@@ -53,6 +54,62 @@ fn parse_pumpfun_trade(data: &[u8], metadata: EventMetadata) -> Option<DexEvent>
 #[inline(always)]
 fn parse_pumpfun_migrate(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     crate::logs::pump::parse_migrate_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfun_migrate_bonding_curve_creator(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::pump::parse_migrate_bonding_curve_creator_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_initialize_fee_config(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_initialize_fee_config_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_reset(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_reset_fee_sharing_config_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_revoke(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_revoke_fee_sharing_authority_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_transfer(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_transfer_fee_sharing_authority_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_update_admin(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_update_admin_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_update_fee_config(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_update_fee_config_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_update_fee_shares(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_update_fee_shares_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfees_upsert_fee_tiers(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_upsert_fee_tiers_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_pumpfun_create_fee_sharing_config(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::pump_fees::parse_create_fee_sharing_config_from_data(data, metadata)
 }
 
 // PumpSwap parsers
@@ -224,7 +281,7 @@ macro_rules! disc_entry {
 /// Compile-time constant array: discriminator -> parser info
 /// MUST be kept sorted by discriminator for binary search!
 ///
-/// Expected latency: 3-8ns (binary search on 31 entries = max 5 comparisons)
+/// Expected latency: 3–8 ns (binary search on 33 discriminators ⇒ at most 6 comparisons)
 pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
     // 按 discriminator 数值升序（binary_search 要求）
     disc_entry!(
@@ -244,6 +301,12 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         "Raydium AMM Deposit",
         parse_raydium_amm_deposit,
         Protocol::RaydiumAmm
+    ),
+    disc_entry!(
+        0x03F36CD5DC68A79B_u64,
+        "PumpFun Migrate Bonding Curve Creator",
+        parse_pumpfun_migrate_bonding_curve_creator,
+        Protocol::PumpFun
     ),
     disc_entry!(
         0x0400000000000000,
@@ -292,10 +355,22 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::MeteoraAmm
     ),
     disc_entry!(
+        0x3E99BE0E3C651772_u64,
+        "Pump Fees Revoke Fee Sharing Authority",
+        parse_pumpfees_revoke,
+        Protocol::PumpFees
+    ),
+    disc_entry!(
         0x529DDC6858292CCA,
         "Meteora AMM Pool Created",
         parse_meteora_amm_pool_created,
         Protocol::MeteoraAmm
+    ),
+    disc_entry!(
+        0x58FB74B8C8AA6985_u64,
+        "Pump Fees Create Fee Sharing Config",
+        parse_pumpfun_create_fee_sharing_config,
+        Protocol::PumpFees
     ),
     // PumpSwap and PumpFun events
     disc_entry!(
@@ -311,6 +386,12 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         "Raydium CLMM Collect Fee",
         parse_raydium_clmm_collect_fee,
         Protocol::RaydiumClmm
+    ),
+    disc_entry!(
+        0x7EE2380AE6F48A59_u64,
+        "Pump Fees Initialize Fee Config",
+        parse_pumpfees_initialize_fee_config,
+        Protocol::PumpFees
     ),
     disc_entry!(
         0x906B8E1F533DF878,
@@ -374,6 +455,24 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::RaydiumClmm
     ),
     disc_entry!(
+        0xCBE1E45BB8C4BA15_u64,
+        "Pump Fees Update Fee Shares",
+        parse_pumpfees_update_fee_shares,
+        Protocol::PumpFees
+    ),
+    disc_entry!(
+        0xCC21BA7ABBA959AB_u64,
+        "Pump Fees Upsert Fee Tiers",
+        parse_pumpfees_upsert_fee_tiers,
+        Protocol::PumpFees
+    ),
+    disc_entry!(
+        0xD0BCF43E2341175A_u64,
+        "Pump Fees Update Fee Config",
+        parse_pumpfees_update_fee_config,
+        Protocol::PumpFees
+    ),
+    disc_entry!(
         0xDE331EC4DA5ABE8F,
         "Raydium CPMM Swap Base In",
         parse_raydium_cpmm_swap_base_in,
@@ -385,7 +484,25 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         parse_orca_pool_initialized,
         Protocol::OrcaWhirlpool
     ),
+    disc_entry!(
+        0xEA423FF657AB98E1_u64,
+        "Pump Fees Update Admin",
+        parse_pumpfees_update_admin,
+        Protocol::PumpFees
+    ),
+    disc_entry!(
+        0xEC08B84DF5C68F7C_u64,
+        "Pump Fees Transfer Fee Sharing Authority",
+        parse_pumpfees_transfer,
+        Protocol::PumpFees
+    ),
     disc_entry!(0xEE61E64ED37FDBBD, "PumpFun Trade", parse_pumpfun_trade, Protocol::PumpFun),
+    disc_entry!(
+        0xF3D63778E297CCCB_u64,
+        "Pump Fees Reset Fee Sharing Config",
+        parse_pumpfees_reset,
+        Protocol::PumpFees
+    ),
     disc_entry!(
         0xF70E375C88267F79,
         "Meteora AMM Bootstrap Liquidity",
@@ -396,7 +513,7 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
 
 /// Fast lookup by discriminator - O(log n) binary search
 ///
-/// With 31 entries, this requires at most 5 comparisons
+/// With 33 entries, this requires at most 6 comparisons
 #[inline(always)]
 pub fn lookup_discriminator(discriminator: u64) -> Option<&'static DiscriminatorInfo> {
     DISCRIMINATOR_LUT
