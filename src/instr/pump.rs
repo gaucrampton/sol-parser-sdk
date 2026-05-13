@@ -19,10 +19,6 @@ pub mod discriminators {
     pub const CREATE_V2: [u8; 8] = [214, 144, 76, 236, 95, 139, 49, 180];
     /// buy_exact_sol_in: Given a budget of spendable SOL, buy at least min_tokens_out (legacy)
     pub const BUY_EXACT_SOL_IN: [u8; 8] = [56, 252, 116, 8, 158, 223, 205, 95];
-    /// `buy_v2` — unified quote mint ([pump-public-docs](https://github.com/pump-fun/pump-public-docs))
-    pub const BUY_V2: [u8; 8] = [184, 23, 238, 97, 103, 197, 211, 61];
-    pub const SELL_V2: [u8; 8] = [93, 246, 130, 60, 231, 233, 64, 178];
-    pub const BUY_EXACT_QUOTE_IN_V2: [u8; 8] = [194, 171, 28, 70, 104, 77, 91, 47];
     /// Migrate event log discriminator (CPI)
     pub const MIGRATE_EVENT_LOG: [u8; 8] = [189, 233, 93, 185, 92, 148, 234, 148];
     /// `migrate_bonding_curve_creator` 外层 ix（`idls/pumpfun.json`）
