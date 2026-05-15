@@ -34,12 +34,16 @@ lazy_static::lazy_static! {
         let mut map = HashMap::new();
         map.insert(Protocol::PumpFun, vec![PUMPFUN_PROGRAM_ID]);
         map.insert(Protocol::PumpSwap, vec![PUMPSWAP_PROGRAM_ID]);
+        map.insert(Protocol::PumpFees, vec![PUMPSWAP_FEES_PROGRAM_ID]);
         map.insert(Protocol::Bonk, vec![BONK_PROGRAM_ID]);
+        map.insert(Protocol::RaydiumLaunchpad, vec![BONK_PROGRAM_ID]);
         map.insert(Protocol::RaydiumCpmm, vec![RAYDIUM_CPMM_PROGRAM_ID]);
         map.insert(Protocol::RaydiumClmm, vec![RAYDIUM_CLMM_PROGRAM_ID]);
         map.insert(Protocol::RaydiumAmmV4, vec![RAYDIUM_AMM_V4_PROGRAM_ID]);
+        map.insert(Protocol::OrcaWhirlpool, vec![ORCA_WHIRLPOOL_PROGRAM_ID]);
+        map.insert(Protocol::MeteoraPools, vec![METEORA_POOLS_PROGRAM_ID]);
         map.insert(Protocol::MeteoraDammV2, vec![METEORA_DAMM_V2_PROGRAM_ID]);
-        // 移除不存在的协议，只保留有实际常量的协议
+        map.insert(Protocol::MeteoraDlmm, vec![METEORA_DLMM_PROGRAM_ID]);
         map
     };
 }
@@ -76,5 +80,29 @@ mod tests {
         assert_eq!(METEORA_POOLS_PROGRAM, instr::program_ids::METEORA_POOLS_PROGRAM_ID);
         assert_eq!(METEORA_DAMM_V2_PROGRAM, instr::program_ids::METEORA_DAMM_V2_PROGRAM_ID);
         assert_eq!(METEORA_DLMM_PROGRAM, instr::program_ids::METEORA_DLMM_PROGRAM_ID);
+    }
+
+    #[test]
+    fn protocol_filter_maps_all_supported_protocols() {
+        let protocols = [
+            Protocol::PumpFun,
+            Protocol::PumpSwap,
+            Protocol::PumpFees,
+            Protocol::Bonk,
+            Protocol::RaydiumLaunchpad,
+            Protocol::RaydiumCpmm,
+            Protocol::RaydiumClmm,
+            Protocol::RaydiumAmmV4,
+            Protocol::OrcaWhirlpool,
+            Protocol::MeteoraPools,
+            Protocol::MeteoraDammV2,
+            Protocol::MeteoraDlmm,
+        ];
+        for protocol in protocols {
+            assert!(
+                PROTOCOL_PROGRAM_IDS.contains_key(&protocol),
+                "missing program id mapping for {protocol:?}"
+            );
+        }
     }
 }

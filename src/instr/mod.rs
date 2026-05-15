@@ -37,8 +37,16 @@ use program_ids::*;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 #[inline(always)]
-fn filter_allows_untyped_protocol(event_type_filter: Option<&EventTypeFilter>) -> bool {
-    event_type_filter.and_then(|f| f.include_only.as_ref()).is_none()
+fn filter_parsed_event(
+    event: Option<DexEvent>,
+    event_type_filter: Option<&EventTypeFilter>,
+) -> Option<DexEvent> {
+    let event = event?;
+    if event_type_filter.map(|f| f.should_include_dex_event(&event)).unwrap_or(true) {
+        Some(event)
+    } else {
+        None
+    }
 }
 
 /// 统一的指令解析入口函数
@@ -66,14 +74,17 @@ pub fn parse_instruction_unified(
         if event_type_filter.is_some() && !event_type_filter.unwrap().includes_pumpfun() {
             return None;
         }
-        return parse_pumpfun_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
-            grpc_recv_us,
+        return filter_parsed_event(
+            parse_pumpfun_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+                grpc_recv_us,
+            ),
+            event_type_filter,
         );
     }
     // PumpSwap (Pump AMM)
@@ -81,13 +92,16 @@ pub fn parse_instruction_unified(
         if event_type_filter.is_some() && !event_type_filter.unwrap().includes_pumpswap() {
             return None;
         }
-        return parse_pumpswap_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            parse_pumpswap_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
     // Meteora DAMM
@@ -95,14 +109,17 @@ pub fn parse_instruction_unified(
         if event_type_filter.is_some() && !event_type_filter.unwrap().includes_meteora_damm_v2() {
             return None;
         }
-        return parse_meteora_damm_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
-            grpc_recv_us,
+        return filter_parsed_event(
+            parse_meteora_damm_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+                grpc_recv_us,
+            ),
+            event_type_filter,
         );
     }
     // Pump fees (`pfeeUx...`)
@@ -110,14 +127,17 @@ pub fn parse_instruction_unified(
         if event_type_filter.is_some() && !event_type_filter.unwrap().includes_pump_fees() {
             return None;
         }
-        return crate::instr::pump_fees::parse_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
-            grpc_recv_us,
+        return filter_parsed_event(
+            crate::instr::pump_fees::parse_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+                grpc_recv_us,
+            ),
+            event_type_filter,
         );
     }
     // Bonk / Raydium Launchpad
@@ -125,97 +145,118 @@ pub fn parse_instruction_unified(
         if event_type_filter.is_some() && !event_type_filter.unwrap().includes_raydium_launchpad() {
             return None;
         }
-        return parse_raydium_launchpad_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            parse_raydium_launchpad_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
     // Raydium CPMM
     else if *program_id == RAYDIUM_CPMM_PROGRAM_ID {
-        if !filter_allows_untyped_protocol(event_type_filter) {
+        if event_type_filter.is_some() && !event_type_filter.unwrap().includes_raydium_cpmm() {
             return None;
         }
-        return crate::instr::raydium_cpmm::parse_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            crate::instr::raydium_cpmm::parse_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
     // Raydium CLMM
     else if *program_id == RAYDIUM_CLMM_PROGRAM_ID {
-        if !filter_allows_untyped_protocol(event_type_filter) {
+        if event_type_filter.is_some() && !event_type_filter.unwrap().includes_raydium_clmm() {
             return None;
         }
-        return crate::instr::raydium_clmm::parse_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            crate::instr::raydium_clmm::parse_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
     // Raydium AMM V4
     else if *program_id == RAYDIUM_AMM_V4_PROGRAM_ID {
-        if !filter_allows_untyped_protocol(event_type_filter) {
+        if event_type_filter.is_some() && !event_type_filter.unwrap().includes_raydium_amm_v4() {
             return None;
         }
-        return crate::instr::raydium_amm::parse_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            crate::instr::raydium_amm::parse_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
     // Orca Whirlpool
     else if *program_id == ORCA_WHIRLPOOL_PROGRAM_ID {
-        if !filter_allows_untyped_protocol(event_type_filter) {
+        if event_type_filter.is_some() && !event_type_filter.unwrap().includes_orca_whirlpool() {
             return None;
         }
-        return crate::instr::orca_whirlpool::parse_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            crate::instr::orca_whirlpool::parse_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
     // Meteora Pools / AMM
     else if *program_id == METEORA_POOLS_PROGRAM_ID {
-        if !filter_allows_untyped_protocol(event_type_filter) {
+        if event_type_filter.is_some() && !event_type_filter.unwrap().includes_meteora_pools() {
             return None;
         }
-        return crate::instr::meteora_amm::parse_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            crate::instr::meteora_amm::parse_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
     // Meteora DLMM
     else if *program_id == METEORA_DLMM_PROGRAM_ID {
-        if !filter_allows_untyped_protocol(event_type_filter) {
+        if event_type_filter.is_some() && !event_type_filter.unwrap().includes_meteora_dlmm() {
             return None;
         }
-        return crate::instr::meteora_dlmm::parse_instruction(
-            instruction_data,
-            accounts,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
+        return filter_parsed_event(
+            crate::instr::meteora_dlmm::parse_instruction(
+                instruction_data,
+                accounts,
+                signature,
+                slot,
+                tx_index,
+                block_time_us,
+            ),
+            event_type_filter,
         );
     }
 

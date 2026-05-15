@@ -245,7 +245,7 @@ fn parse_inner_instruction(
     use crate::instr::{all_inner, program_ids, pump_amm_inner, pump_inner, raydium_clmm_inner};
 
     // 根据 program_id 路由到对应的 inner instruction 解析器
-    if *program_id == program_ids::PUMPFUN_PROGRAM_ID {
+    let event = if *program_id == program_ids::PUMPFUN_PROGRAM_ID {
         if let Some(f) = filter {
             if !f.includes_pumpfun() {
                 return None;
@@ -264,19 +264,51 @@ fn parse_inner_instruction(
             }
         }
         pump_amm_inner::parse_pumpswap_inner_instruction(&discriminator, inner_data, metadata)
+    } else if *program_id == program_ids::PUMP_FEES_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_pump_fees() {
+                return None;
+            }
+        }
+        all_inner::pump_fees::parse(&discriminator, inner_data, metadata)
     } else if *program_id == program_ids::RAYDIUM_CLMM_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_raydium_clmm() {
+                return None;
+            }
+        }
         raydium_clmm_inner::parse_raydium_clmm_inner_instruction(
             &discriminator,
             inner_data,
             metadata,
         )
     } else if *program_id == program_ids::RAYDIUM_CPMM_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_raydium_cpmm() {
+                return None;
+            }
+        }
         all_inner::raydium_cpmm::parse(&discriminator, inner_data, metadata)
     } else if *program_id == program_ids::RAYDIUM_AMM_V4_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_raydium_amm_v4() {
+                return None;
+            }
+        }
         all_inner::raydium_amm::parse(&discriminator, inner_data, metadata)
     } else if *program_id == program_ids::ORCA_WHIRLPOOL_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_orca_whirlpool() {
+                return None;
+            }
+        }
         all_inner::orca::parse(&discriminator, inner_data, metadata)
     } else if *program_id == program_ids::METEORA_POOLS_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_meteora_pools() {
+                return None;
+            }
+        }
         all_inner::meteora_amm::parse(&discriminator, inner_data, metadata)
     } else if *program_id == program_ids::METEORA_DAMM_V2_PROGRAM_ID {
         if let Some(f) = filter {
@@ -285,8 +317,27 @@ fn parse_inner_instruction(
             }
         }
         all_inner::meteora_damm::parse(&discriminator, inner_data, metadata)
+    } else if *program_id == program_ids::METEORA_DLMM_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_meteora_dlmm() {
+                return None;
+            }
+        }
+        all_inner::meteora_dlmm::parse(&discriminator, inner_data, metadata)
     } else if *program_id == program_ids::BONK_PROGRAM_ID {
+        if let Some(f) = filter {
+            if !f.includes_raydium_launchpad() {
+                return None;
+            }
+        }
         all_inner::bonk::parse(&discriminator, inner_data, metadata)
+    } else {
+        None
+    };
+
+    if filter.map(|f| event.as_ref().is_some_and(|e| f.should_include_dex_event(e))).unwrap_or(true)
+    {
+        event
     } else {
         None
     }
@@ -359,7 +410,9 @@ fn should_parse_instructions(filter: Option<&EventTypeFilter>) -> bool {
     let Some(filter) = filter else { return true };
 
     // 如果 filter.include_only 为空，总是解析
-    let Some(ref include_only) = filter.include_only else { return true };
+    if filter.include_only.is_none() {
+        return true;
+    }
 
     // PumpFun：外层 BUY/SELL 在 `instr/pump.rs` 不解析，但每笔买 inner 里仍有 Trade CPI；
     // 仅走 `log_messages` 时，若 RPC 截断日志会 **丢多笔 Trade**。
@@ -372,19 +425,15 @@ fn should_parse_instructions(filter: Option<&EventTypeFilter>) -> bool {
         return true;
     }
 
-    // 其它协议：按需解析
-    include_only.iter().any(|t| {
-        use crate::grpc::types::EventType::*;
-        matches!(
-            t,
-            PumpFunMigrate
-                | MeteoraDammV2Swap
-                | MeteoraDammV2AddLiquidity
-                | MeteoraDammV2CreatePosition
-                | MeteoraDammV2ClosePosition
-                | MeteoraDammV2RemoveLiquidity
-        )
-    })
+    filter.includes_pumpswap()
+        || filter.includes_raydium_launchpad()
+        || filter.includes_raydium_cpmm()
+        || filter.includes_raydium_clmm()
+        || filter.includes_raydium_amm_v4()
+        || filter.includes_orca_whirlpool()
+        || filter.includes_meteora_pools()
+        || filter.includes_meteora_damm_v2()
+        || filter.includes_meteora_dlmm()
 }
 
 #[cfg(test)]
@@ -414,6 +463,25 @@ mod tests {
             exclude_types: None,
         };
         assert!(should_parse_instructions(Some(&filter)));
+
+        for event_type in [
+            EventType::PumpSwapTrade,
+            EventType::PumpFeesUpdateFeeShares,
+            EventType::BonkTrade,
+            EventType::RaydiumCpmmSwap,
+            EventType::RaydiumClmmSwap,
+            EventType::RaydiumAmmV4Swap,
+            EventType::OrcaWhirlpoolSwap,
+            EventType::MeteoraPoolsSwap,
+            EventType::MeteoraDammV2Swap,
+            EventType::MeteoraDlmmSwap,
+        ] {
+            let filter = EventTypeFilter::include_only(vec![event_type]);
+            assert!(
+                should_parse_instructions(Some(&filter)),
+                "instruction parsing should be enabled for {event_type:?}"
+            );
+        }
     }
 
     #[test]

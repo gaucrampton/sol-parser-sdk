@@ -297,6 +297,38 @@ pub fn parse_initialize2_from_data(data: &[u8], metadata: EventMetadata) -> Opti
     }))
 }
 
+/// Parse Raydium AMM V4 WithdrawPnl event from pre-decoded data
+#[inline(always)]
+pub fn parse_withdraw_pnl_from_data(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    let mut offset = 0;
+
+    let amm = read_pubkey(data, offset)?;
+    offset += 32;
+
+    let pnl_owner = read_pubkey(data, offset)?;
+
+    Some(DexEvent::RaydiumAmmV4WithdrawPnl(RaydiumAmmV4WithdrawPnlEvent {
+        metadata,
+        token_program: Pubkey::default(),
+        amm,
+        amm_config: Pubkey::default(),
+        amm_authority: Pubkey::default(),
+        amm_open_orders: Pubkey::default(),
+        pool_coin_token_account: Pubkey::default(),
+        pool_pc_token_account: Pubkey::default(),
+        coin_pnl_token_account: Pubkey::default(),
+        pc_pnl_token_account: Pubkey::default(),
+        pnl_owner,
+        amm_target_orders: Pubkey::default(),
+        serum_program: Pubkey::default(),
+        serum_market: Pubkey::default(),
+        serum_event_queue: Pubkey::default(),
+        serum_coin_vault_account: Pubkey::default(),
+        serum_pc_vault_account: Pubkey::default(),
+        serum_vault_signer: Pubkey::default(),
+    }))
+}
+
 /// 解析 SwapBaseIn 事件
 fn parse_swap_base_in_event(
     data: &[u8],

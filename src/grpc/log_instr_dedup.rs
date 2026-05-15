@@ -1,4 +1,4 @@
-//! Yellowstone gRPC 单笔交易解析会并行跑 **log** 与 **instruction** 两路，结果直接拼接，
+//! Yellowstone gRPC 单笔交易解析会跑 **log** 与 **instruction** 两路，结果直接拼接，
 //! 同一链上事实可能被输出成两条 `DexEvent`。本模块在合并阶段按「业务指纹」去重，
 //! 并对同指纹事件做 **log 优先、ix 补充** 的字段合并（见 `merge_grpc_instruction_into_log`）。
 //!

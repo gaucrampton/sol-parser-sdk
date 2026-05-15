@@ -242,6 +242,7 @@ mod discriminators {
     pub const RAYDIUM_AMM_DEPOSIT: u64 = u64::from_le_bytes([0, 0, 0, 0, 0, 0, 0, 3]);
     pub const RAYDIUM_AMM_WITHDRAW: u64 = u64::from_le_bytes([0, 0, 0, 0, 0, 0, 0, 4]);
     pub const RAYDIUM_AMM_INITIALIZE2: u64 = u64::from_le_bytes([0, 0, 0, 0, 0, 0, 0, 1]);
+    pub const RAYDIUM_AMM_WITHDRAW_PNL: u64 = u64::from_le_bytes([0, 0, 0, 0, 0, 0, 0, 7]);
 
     // Orca Whirlpool discriminators
     pub const ORCA_TRADED: u64 = u64::from_le_bytes([225, 202, 73, 175, 147, 43, 160, 150]);
@@ -262,6 +263,8 @@ mod discriminators {
         u64::from_le_bytes([121, 127, 38, 136, 92, 55, 14, 247]);
     pub const METEORA_AMM_POOL_CREATED: u64 =
         u64::from_le_bytes([202, 44, 41, 88, 104, 220, 157, 82]);
+    pub const METEORA_AMM_SET_POOL_FEES: u64 =
+        u64::from_le_bytes([245, 26, 198, 164, 88, 18, 75, 9]);
 
     // Meteora DAMM V2 discriminators
     pub const METEORA_DAMM_SWAP: u64 = u64::from_le_bytes([27, 60, 21, 213, 138, 170, 187, 147]);
@@ -285,23 +288,26 @@ mod discriminators {
         u64::from_le_bytes([80, 85, 209, 72, 24, 206, 35, 178]);
     pub const METEORA_DLMM_INITIALIZE_POOL: u64 =
         u64::from_le_bytes([95, 180, 10, 172, 84, 174, 232, 40]);
+    pub const METEORA_DLMM_INITIALIZE_BIN_ARRAY: u64 =
+        u64::from_le_bytes([11, 18, 155, 194, 33, 115, 238, 119]);
     pub const METEORA_DLMM_CREATE_POSITION: u64 =
         u64::from_le_bytes([123, 233, 11, 43, 146, 180, 97, 119]);
     pub const METEORA_DLMM_CLOSE_POSITION: u64 =
         u64::from_le_bytes([94, 168, 102, 45, 59, 122, 137, 54]);
+    pub const METEORA_DLMM_CLAIM_FEE: u64 = u64::from_le_bytes([152, 70, 208, 111, 104, 91, 44, 1]);
 }
 
-/// Optimized unified log parser with **single-decode, early-filter** strategy
+/// Optimized unified log parser with **discriminator predecode, decode-on-match** strategy
 ///
 /// **Performance Strategy**:
-/// 1. Decode base64 ONCE to stack buffer (~100ns)
-/// 2. Extract discriminator from decoded data (~5ns)
-/// 3. Check filter BEFORE parsing fields - return None if not wanted
+/// 1. Decode only the first 8 event bytes to read the discriminator
+/// 2. Check filter BEFORE decoding the full event payload
+/// 3. Decode matching payloads once to a stack buffer; rare large events use heap
 /// 4. Parse only the specific event type requested
 ///
-/// **Key optimization**: NO double base64 decoding!
-/// Old: extract_discriminator(decode) -> parser(decode again) = 2x decode
-/// New: decode once -> check filter -> parse from buffer = 1x decode
+/// **Key optimization**: narrow filters skip full base64 decoding entirely.
+/// Old: decode full payload -> check filter -> parse
+/// New: decode discriminator prefix -> check filter -> decode matching payload once
 #[inline(always)]
 /// `recent_blockhash`: pass as `Option<&[u8]>`; only cloned when an event is built (low latency).
 pub fn parse_log_optimized(
@@ -362,6 +368,119 @@ pub fn parse_log_optimized_with_program_id(
 }
 
 #[inline(always)]
+fn decode_base64_discriminator(trimmed: &str) -> Option<u64> {
+    let bytes = trimmed.as_bytes();
+    if bytes.len() < 12 {
+        return None;
+    }
+
+    let mut discriminator_buf = [0u8; 9];
+    let decoded_len = {
+        use base64_simd::AsOut;
+        let decoded =
+            base64_simd::STANDARD.decode(&bytes[..12], discriminator_buf.as_mut().as_out()).ok()?;
+        decoded.len()
+    };
+    if decoded_len < 8 {
+        return None;
+    }
+
+    Some(unsafe { (discriminator_buf.as_ptr() as *const u64).read_unaligned() })
+}
+
+#[inline(always)]
+fn filter_includes_known_program(program_id: &Pubkey, filter: &EventTypeFilter) -> bool {
+    match *program_id {
+        program_ids::PUMPFUN_PROGRAM_ID => filter.includes_pumpfun(),
+        program_ids::PUMP_FEES_PROGRAM_ID => filter.includes_pump_fees(),
+        program_ids::PUMPSWAP_PROGRAM_ID => filter.includes_pumpswap(),
+        program_ids::BONK_PROGRAM_ID => filter.includes_raydium_launchpad(),
+        program_ids::RAYDIUM_CLMM_PROGRAM_ID => filter.includes_raydium_clmm(),
+        program_ids::RAYDIUM_CPMM_PROGRAM_ID => filter.includes_raydium_cpmm(),
+        program_ids::RAYDIUM_AMM_V4_PROGRAM_ID => filter.includes_raydium_amm_v4(),
+        program_ids::ORCA_WHIRLPOOL_PROGRAM_ID => filter.includes_orca_whirlpool(),
+        program_ids::METEORA_POOLS_PROGRAM_ID => filter.includes_meteora_pools(),
+        program_ids::METEORA_DAMM_V2_PROGRAM_ID => filter.includes_meteora_damm_v2(),
+        program_ids::METEORA_DLMM_PROGRAM_ID => filter.includes_meteora_dlmm(),
+        _ => true,
+    }
+}
+
+#[inline(always)]
+fn filter_wants_supported_logs(filter: &EventTypeFilter) -> bool {
+    filter.includes_pumpfun()
+        || filter.includes_pump_fees()
+        || filter.includes_pumpswap()
+        || filter.includes_raydium_launchpad()
+        || filter.includes_raydium_clmm()
+        || filter.includes_raydium_cpmm()
+        || filter.includes_raydium_amm_v4()
+        || filter.includes_orca_whirlpool()
+        || filter.includes_meteora_pools()
+        || filter.includes_meteora_damm_v2()
+        || filter.includes_meteora_dlmm()
+}
+
+#[inline(always)]
+fn unscoped_filter_allows_discriminator(discriminator: u64, filter: &EventTypeFilter) -> bool {
+    match discriminator {
+        // Shared by Pump.fun trade and Raydium Launchpad/Bonk trade.
+        discriminators::PUMPFUN_TRADE => {
+            filter.should_include(EventType::PumpFunTrade)
+                || filter.should_include(EventType::BonkTrade)
+        }
+        // Shared by Raydium CLMM create-pool and Raydium CPMM initialize.
+        discriminators::RAYDIUM_CLMM_CREATE_POOL => {
+            filter.should_include(EventType::RaydiumClmmCreatePool)
+                || filter.should_include(EventType::RaydiumCpmmInitialize)
+        }
+        // Shared by Raydium CPMM swap-base-in and Meteora DLMM swap.
+        discriminators::RAYDIUM_CPMM_SWAP_BASE_IN => {
+            filter.should_include(EventType::RaydiumCpmmSwap)
+                || filter.should_include(EventType::MeteoraDlmmSwap)
+        }
+        _ => discriminator_to_event_type(discriminator)
+            .map(|event_type| filter.should_include(event_type))
+            .unwrap_or_else(|| filter_wants_supported_logs(filter)),
+    }
+}
+
+#[inline(always)]
+fn filter_allows_discriminator(
+    program_id: Option<&Pubkey>,
+    discriminator: u64,
+    event_type_filter: Option<&EventTypeFilter>,
+) -> bool {
+    let Some(filter) = event_type_filter else {
+        return true;
+    };
+
+    if let Some(program_id) = program_id {
+        if let Some(event_type) =
+            program_scoped_discriminator_to_event_type(program_id, discriminator)
+        {
+            return filter.should_include(event_type);
+        }
+        return filter_includes_known_program(program_id, filter);
+    }
+
+    unscoped_filter_allows_discriminator(discriminator, filter)
+}
+
+#[inline(always)]
+fn apply_event_type_filter(
+    event: DexEvent,
+    event_type_filter: Option<&EventTypeFilter>,
+) -> Option<DexEvent> {
+    if let Some(filter) = event_type_filter {
+        if !filter.should_include_dex_event(&event) {
+            return None;
+        }
+    }
+    Some(event)
+}
+
+#[inline(always)]
 fn parse_log_optimized_inner(
     log: &str,
     signature: Signature,
@@ -383,83 +502,46 @@ fn parse_log_optimized_inner(
         return None;
     }
 
-    // Step 2: Decode base64 ONCE to stack buffer (compiler auto-vectorized, zero heap allocation)
-    let mut buf = [0u8; 2048]; // Increased back to 2048 to prevent buffer overflow panics
+    // Step 2: Decode base64 ONCE. Normal swap logs stay on the stack; rare large
+    // IDL events (for example pump-fees vectors) fall back to heap instead of being dropped.
+    const STACK_DECODE_CAP: usize = 2048;
     let data_part = &log[data_start..];
     let trimmed = data_part.trim();
 
-    // Validate input size before decoding (base64: 4 chars -> 3 bytes, so max input = (2048/3)*4 = ~2730 chars)
-    // Add safety margin to prevent base64-simd assertion failures
-    if trimmed.len() > 2700 {
+    // Decode the discriminator prefix before touching the full payload. This is
+    // the fastest reject path for users subscribing to a narrow event set.
+    let discriminator = decode_base64_discriminator(trimmed)?;
+    if !filter_allows_discriminator(program_id, discriminator, event_type_filter) {
         return None;
     }
 
     // SIMD-accelerated base64 decoding (AVX2/SSE4/NEON)
     use base64_simd::AsOut;
-    let decoded_slice =
-        base64_simd::STANDARD.decode(trimmed.as_bytes(), buf.as_mut().as_out()).ok()?;
-    let decoded_len = decoded_slice.len();
+    let max_decoded_len = (trimmed.len() / 4).saturating_mul(3).saturating_add(3);
+    let mut stack_buf = [0u8; STACK_DECODE_CAP];
+    let heap_buf: Vec<u8>;
+    let program_data: &[u8] = if max_decoded_len <= STACK_DECODE_CAP {
+        let decoded_len = {
+            let decoded_slice = base64_simd::STANDARD
+                .decode(trimmed.as_bytes(), stack_buf.as_mut().as_out())
+                .ok()?;
+            decoded_slice.len()
+        };
+        &stack_buf[..decoded_len]
+    } else {
+        heap_buf = base64_simd::STANDARD.decode_to_vec(trimmed.as_bytes()).ok()?;
+        heap_buf.as_slice()
+    };
 
-    if decoded_len < 8 {
+    if program_data.len() < 8 {
         return None;
     }
 
-    let program_data = &buf[..decoded_len];
+    debug_assert_eq!(discriminator, unsafe {
+        (program_data.as_ptr() as *const u64).read_unaligned()
+    });
 
-    // Step 3: Extract discriminator (~5ns, just read 8 bytes)
-    let discriminator = unsafe {
-        let ptr = program_data.as_ptr() as *const u64;
-        ptr.read_unaligned()
-    };
-
-    // Step 4: Map discriminator to EventType for early filtering
-    let event_type = discriminator_to_event_type(discriminator);
-
-    // Step 5: Early filter check - BEFORE parsing any fields!
-    if program_id.is_none() {
-        if let Some(filter) = event_type_filter {
-            if let Some(et) = event_type {
-                if !filter.should_include(et) {
-                    return None; // Skip ALL parsing - saves ~200-500ns
-                }
-            } else {
-                // Unknown discriminator - check if any supported protocol is wanted
-                if let Some(ref include_only) = filter.include_only {
-                    let wants_supported = include_only.iter().any(|t| {
-                        matches!(
-                            t,
-                            EventType::PumpFunTrade
-                                | EventType::PumpFunCreate
-                                | EventType::PumpFunMigrate
-                                | EventType::PumpFunBuy
-                                | EventType::PumpFunSell
-                                | EventType::PumpFunBuyExactSolIn
-                                | EventType::PumpFunMigrateBondingCurveCreator
-                                | EventType::PumpFeesCreateFeeSharingConfig
-                                | EventType::PumpFeesInitializeFeeConfig
-                                | EventType::PumpFeesResetFeeSharingConfig
-                                | EventType::PumpFeesRevokeFeeSharingAuthority
-                                | EventType::PumpFeesTransferFeeSharingAuthority
-                                | EventType::PumpFeesUpdateAdmin
-                                | EventType::PumpFeesUpdateFeeConfig
-                                | EventType::PumpFeesUpdateFeeShares
-                                | EventType::PumpFeesUpsertFeeTiers
-                                | EventType::PumpSwapBuy
-                                | EventType::PumpSwapSell
-                                | EventType::PumpSwapCreatePool
-                                | EventType::PumpSwapLiquidityAdded
-                                | EventType::PumpSwapLiquidityRemoved
-                        )
-                    });
-                    if !wants_supported {
-                        return None;
-                    }
-                }
-            }
-        }
-    }
-
-    // Step 6: Parse the specific event type (data already decoded!)
+    // Step 6: Parse the specific event type (data already decoded)
     let data = &program_data[8..]; // Skip discriminator
 
     use crate::core::events::*;
@@ -500,71 +582,46 @@ fn parse_log_optimized_inner(
     if likely(discriminator == discriminators::PUMPFUN_TRADE) {
         // PumpFun Trade - Most common (~40% of all events)
         let event = crate::logs::pump::parse_trade_from_data(data, metadata, is_created_buy)?;
-        // Secondary filter check
-        if let Some(filter) = event_type_filter {
-            if let Some(ref include_only) = filter.include_only {
-                let has_specific_filter = include_only.iter().any(|t| {
-                    matches!(
-                        t,
-                        EventType::PumpFunBuy
-                            | EventType::PumpFunSell
-                            | EventType::PumpFunBuyExactSolIn
-                            | EventType::PumpFunCreate
-                            | EventType::PumpFunCreateV2
-                    )
-                });
-                if has_specific_filter {
-                    let event_type_matches = match &event {
-                        DexEvent::PumpFunBuy(_) => include_only.contains(&EventType::PumpFunBuy),
-                        DexEvent::PumpFunSell(_) => include_only.contains(&EventType::PumpFunSell),
-                        DexEvent::PumpFunBuyExactSolIn(_) => {
-                            include_only.contains(&EventType::PumpFunBuyExactSolIn)
-                        }
-                        DexEvent::PumpFunTrade(_) => {
-                            include_only.contains(&EventType::PumpFunTrade)
-                        }
-                        DexEvent::PumpFunCreate(_) => {
-                            include_only.contains(&EventType::PumpFunCreate)
-                        }
-                        DexEvent::PumpFunCreateV2(_) => {
-                            include_only.contains(&EventType::PumpFunCreateV2)
-                        }
-                        _ => false,
-                    };
-                    if !event_type_matches {
-                        return None;
-                    }
-                }
-            }
-        }
-        return Some(event);
+        return apply_event_type_filter(event, event_type_filter);
     }
 
     if likely(discriminator == discriminators::RAYDIUM_CLMM_SWAP) {
         // Raydium CLMM Swap - High frequency (~20% of events)
-        return crate::logs::raydium_clmm::parse_swap_from_data(data, metadata);
+        return apply_event_type_filter(
+            crate::logs::raydium_clmm::parse_swap_from_data(data, metadata)?,
+            event_type_filter,
+        );
     }
 
     if likely(discriminator == discriminators::RAYDIUM_AMM_SWAP_BASE_IN) {
         // Raydium AMM Swap Base In - High frequency (~15% of events)
-        return crate::logs::raydium_amm::parse_swap_base_in_from_data(data, metadata);
+        return apply_event_type_filter(
+            crate::logs::raydium_amm::parse_swap_base_in_from_data(data, metadata)?,
+            event_type_filter,
+        );
     }
 
     if likely(discriminator == discriminators::PUMPSWAP_BUY) {
         // PumpSwap Buy - Medium frequency (~10% of events)
-        return crate::logs::pump_amm::parse_buy_from_data(data, metadata);
+        return apply_event_type_filter(
+            crate::logs::pump_amm::parse_buy_from_data(data, metadata)?,
+            event_type_filter,
+        );
     }
 
     if discriminator == discriminators::PUMPSWAP_SELL {
         // PumpSwap Sell - Medium frequency (~5% of events)
-        return crate::logs::pump_amm::parse_sell_from_data(data, metadata);
+        return apply_event_type_filter(
+            crate::logs::pump_amm::parse_sell_from_data(data, metadata)?,
+            event_type_filter,
+        );
     }
 
     // ========================================================================
     // Cold path: Handle remaining ~10% of events via match statement
     // ========================================================================
 
-    match discriminator {
+    let event = match discriminator {
         // Note: Hot-path discriminators (PUMPFUN_TRADE, RAYDIUM_CLMM_SWAP, RAYDIUM_AMM_SWAP_BASE_IN,
         // PUMPSWAP_BUY, PUMPSWAP_SELL) are handled above and never reach this match statement
 
@@ -660,6 +717,9 @@ fn parse_log_optimized_inner(
         discriminators::RAYDIUM_AMM_INITIALIZE2 => {
             crate::logs::raydium_amm::parse_initialize2_from_data(data, metadata)
         }
+        discriminators::RAYDIUM_AMM_WITHDRAW_PNL => {
+            crate::logs::raydium_amm::parse_withdraw_pnl_from_data(data, metadata)
+        }
 
         // Orca Whirlpool - use from_data functions (single decode)
         discriminators::ORCA_TRADED => {
@@ -691,22 +751,29 @@ fn parse_log_optimized_inner(
         discriminators::METEORA_AMM_POOL_CREATED => {
             crate::logs::meteora_amm::parse_pool_created_from_data(data, metadata)
         }
+        discriminators::METEORA_AMM_SET_POOL_FEES => {
+            crate::logs::meteora_amm::parse_set_pool_fees_from_data(data, metadata)
+        }
 
         // Meteora DAMM V2
-        discriminators::METEORA_DAMM_SWAP
-        | discriminators::METEORA_DAMM_SWAP2
-        | discriminators::METEORA_DAMM_ADD_LIQUIDITY
-        | discriminators::METEORA_DAMM_REMOVE_LIQUIDITY
-        | discriminators::METEORA_DAMM_INITIALIZE_POOL
-        | discriminators::METEORA_DAMM_CREATE_POSITION
-        | discriminators::METEORA_DAMM_CLOSE_POSITION => crate::logs::parse_meteora_damm_log(
-            log,
-            signature,
-            slot,
-            tx_index,
-            block_time_us,
-            grpc_recv_us,
-        ),
+        discriminators::METEORA_DAMM_SWAP => {
+            crate::logs::meteora_damm::parse_swap_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_SWAP2 => {
+            crate::logs::meteora_damm::parse_swap2_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_ADD_LIQUIDITY => {
+            crate::logs::meteora_damm::parse_add_liquidity_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_REMOVE_LIQUIDITY => {
+            crate::logs::meteora_damm::parse_remove_liquidity_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_CREATE_POSITION => {
+            crate::logs::meteora_damm::parse_create_position_from_data(data, metadata)
+        }
+        discriminators::METEORA_DAMM_CLOSE_POSITION => {
+            crate::logs::meteora_damm::parse_close_position_from_data(data, metadata)
+        }
 
         // NOTE: Meteora DLMM discriminators conflict with Raydium CPMM!
         // METEORA_DLMM_SWAP == RAYDIUM_CPMM_SWAP_BASE_IN
@@ -723,16 +790,158 @@ fn parse_log_optimized_inner(
                 block_time_us,
                 grpc_recv_us,
             ) {
-                return Some(event);
+                return apply_event_type_filter(event, event_type_filter);
             }
             None
         }
-    }
+    }?;
+    apply_event_type_filter(event, event_type_filter)
 }
 
 #[inline(always)]
-fn filter_allows_untyped_protocol(event_type_filter: Option<&EventTypeFilter>) -> bool {
-    event_type_filter.and_then(|f| f.include_only.as_ref()).is_none()
+fn program_scoped_discriminator_to_event_type(
+    program_id: &Pubkey,
+    discriminator: u64,
+) -> Option<EventType> {
+    match *program_id {
+        program_ids::PUMPFUN_PROGRAM_ID => match discriminator {
+            discriminators::PUMPFUN_CREATE => Some(EventType::PumpFunCreate),
+            discriminators::PUMPFUN_TRADE => Some(EventType::PumpFunTrade),
+            discriminators::PUMPFUN_MIGRATE => Some(EventType::PumpFunMigrate),
+            discriminators::PUMPFUN_MIGRATE_BONDING_CURVE_CREATOR => {
+                Some(EventType::PumpFunMigrateBondingCurveCreator)
+            }
+            _ => None,
+        },
+        program_ids::PUMP_FEES_PROGRAM_ID => match discriminator {
+            discriminators::PUMP_FEES_CREATE_FEE_SHARING_CONFIG => {
+                Some(EventType::PumpFeesCreateFeeSharingConfig)
+            }
+            discriminators::PUMP_FEES_INITIALIZE_FEE_CONFIG => {
+                Some(EventType::PumpFeesInitializeFeeConfig)
+            }
+            discriminators::PUMP_FEES_RESET_FEE_SHARING_CONFIG => {
+                Some(EventType::PumpFeesResetFeeSharingConfig)
+            }
+            discriminators::PUMP_FEES_REVOKE_FEE_SHARING_AUTHORITY => {
+                Some(EventType::PumpFeesRevokeFeeSharingAuthority)
+            }
+            discriminators::PUMP_FEES_TRANSFER_FEE_SHARING_AUTHORITY => {
+                Some(EventType::PumpFeesTransferFeeSharingAuthority)
+            }
+            discriminators::PUMP_FEES_UPDATE_ADMIN => Some(EventType::PumpFeesUpdateAdmin),
+            discriminators::PUMP_FEES_UPDATE_FEE_CONFIG => Some(EventType::PumpFeesUpdateFeeConfig),
+            discriminators::PUMP_FEES_UPDATE_FEE_SHARES => Some(EventType::PumpFeesUpdateFeeShares),
+            discriminators::PUMP_FEES_UPSERT_FEE_TIERS => Some(EventType::PumpFeesUpsertFeeTiers),
+            _ => None,
+        },
+        program_ids::PUMPSWAP_PROGRAM_ID => match discriminator {
+            discriminators::PUMPSWAP_BUY => Some(EventType::PumpSwapBuy),
+            discriminators::PUMPSWAP_SELL => Some(EventType::PumpSwapSell),
+            discriminators::PUMPSWAP_CREATE_POOL => Some(EventType::PumpSwapCreatePool),
+            discriminators::PUMPSWAP_ADD_LIQUIDITY => Some(EventType::PumpSwapLiquidityAdded),
+            discriminators::PUMPSWAP_REMOVE_LIQUIDITY => Some(EventType::PumpSwapLiquidityRemoved),
+            _ => None,
+        },
+        program_ids::BONK_PROGRAM_ID => match discriminator {
+            discriminators::RAYDIUM_LAUNCHPAD_TRADE => Some(EventType::BonkTrade),
+            discriminators::RAYDIUM_LAUNCHPAD_POOL_CREATE => Some(EventType::BonkPoolCreate),
+            _ => None,
+        },
+        program_ids::RAYDIUM_CLMM_PROGRAM_ID => match discriminator {
+            discriminators::RAYDIUM_CLMM_SWAP => Some(EventType::RaydiumClmmSwap),
+            discriminators::RAYDIUM_CLMM_INCREASE_LIQUIDITY => {
+                Some(EventType::RaydiumClmmIncreaseLiquidity)
+            }
+            discriminators::RAYDIUM_CLMM_DECREASE_LIQUIDITY => {
+                Some(EventType::RaydiumClmmDecreaseLiquidity)
+            }
+            discriminators::RAYDIUM_CLMM_CREATE_POOL => Some(EventType::RaydiumClmmCreatePool),
+            discriminators::RAYDIUM_CLMM_COLLECT_FEE => Some(EventType::RaydiumClmmCollectFee),
+            _ => None,
+        },
+        program_ids::RAYDIUM_CPMM_PROGRAM_ID => match discriminator {
+            discriminators::RAYDIUM_CPMM_SWAP_BASE_IN
+            | discriminators::RAYDIUM_CPMM_SWAP_BASE_OUT => Some(EventType::RaydiumCpmmSwap),
+            discriminators::RAYDIUM_CPMM_CREATE_POOL => Some(EventType::RaydiumCpmmInitialize),
+            discriminators::RAYDIUM_CPMM_DEPOSIT => Some(EventType::RaydiumCpmmDeposit),
+            discriminators::RAYDIUM_CPMM_WITHDRAW => Some(EventType::RaydiumCpmmWithdraw),
+            _ => None,
+        },
+        program_ids::RAYDIUM_AMM_V4_PROGRAM_ID => match discriminator {
+            discriminators::RAYDIUM_AMM_SWAP_BASE_IN
+            | discriminators::RAYDIUM_AMM_SWAP_BASE_OUT => Some(EventType::RaydiumAmmV4Swap),
+            discriminators::RAYDIUM_AMM_DEPOSIT => Some(EventType::RaydiumAmmV4Deposit),
+            discriminators::RAYDIUM_AMM_WITHDRAW => Some(EventType::RaydiumAmmV4Withdraw),
+            discriminators::RAYDIUM_AMM_INITIALIZE2 => Some(EventType::RaydiumAmmV4Initialize2),
+            discriminators::RAYDIUM_AMM_WITHDRAW_PNL => Some(EventType::RaydiumAmmV4WithdrawPnl),
+            _ => None,
+        },
+        program_ids::ORCA_WHIRLPOOL_PROGRAM_ID => match discriminator {
+            discriminators::ORCA_TRADED => Some(EventType::OrcaWhirlpoolSwap),
+            discriminators::ORCA_LIQUIDITY_INCREASED => {
+                Some(EventType::OrcaWhirlpoolLiquidityIncreased)
+            }
+            discriminators::ORCA_LIQUIDITY_DECREASED => {
+                Some(EventType::OrcaWhirlpoolLiquidityDecreased)
+            }
+            discriminators::ORCA_POOL_INITIALIZED => Some(EventType::OrcaWhirlpoolPoolInitialized),
+            _ => None,
+        },
+        program_ids::METEORA_POOLS_PROGRAM_ID => match discriminator {
+            discriminators::METEORA_AMM_SWAP => Some(EventType::MeteoraPoolsSwap),
+            discriminators::METEORA_AMM_ADD_LIQUIDITY => Some(EventType::MeteoraPoolsAddLiquidity),
+            discriminators::METEORA_AMM_REMOVE_LIQUIDITY => {
+                Some(EventType::MeteoraPoolsRemoveLiquidity)
+            }
+            discriminators::METEORA_AMM_BOOTSTRAP_LIQUIDITY => {
+                Some(EventType::MeteoraPoolsBootstrapLiquidity)
+            }
+            discriminators::METEORA_AMM_POOL_CREATED => Some(EventType::MeteoraPoolsPoolCreated),
+            discriminators::METEORA_AMM_SET_POOL_FEES => Some(EventType::MeteoraPoolsSetPoolFees),
+            _ => None,
+        },
+        program_ids::METEORA_DAMM_V2_PROGRAM_ID => match discriminator {
+            discriminators::METEORA_DAMM_SWAP | discriminators::METEORA_DAMM_SWAP2 => {
+                Some(EventType::MeteoraDammV2Swap)
+            }
+            discriminators::METEORA_DAMM_ADD_LIQUIDITY => {
+                Some(EventType::MeteoraDammV2AddLiquidity)
+            }
+            discriminators::METEORA_DAMM_REMOVE_LIQUIDITY => {
+                Some(EventType::MeteoraDammV2RemoveLiquidity)
+            }
+            discriminators::METEORA_DAMM_CREATE_POSITION => {
+                Some(EventType::MeteoraDammV2CreatePosition)
+            }
+            discriminators::METEORA_DAMM_CLOSE_POSITION => {
+                Some(EventType::MeteoraDammV2ClosePosition)
+            }
+            _ => None,
+        },
+        program_ids::METEORA_DLMM_PROGRAM_ID => match discriminator {
+            discriminators::METEORA_DLMM_SWAP => Some(EventType::MeteoraDlmmSwap),
+            discriminators::METEORA_DLMM_ADD_LIQUIDITY => Some(EventType::MeteoraDlmmAddLiquidity),
+            discriminators::METEORA_DLMM_REMOVE_LIQUIDITY => {
+                Some(EventType::MeteoraDlmmRemoveLiquidity)
+            }
+            discriminators::METEORA_DLMM_INITIALIZE_POOL => {
+                Some(EventType::MeteoraDlmmInitializePool)
+            }
+            discriminators::METEORA_DLMM_INITIALIZE_BIN_ARRAY => {
+                Some(EventType::MeteoraDlmmInitializeBinArray)
+            }
+            discriminators::METEORA_DLMM_CREATE_POSITION => {
+                Some(EventType::MeteoraDlmmCreatePosition)
+            }
+            discriminators::METEORA_DLMM_CLOSE_POSITION => {
+                Some(EventType::MeteoraDlmmClosePosition)
+            }
+            discriminators::METEORA_DLMM_CLAIM_FEE => Some(EventType::MeteoraDlmmClaimFee),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 #[inline(always)]
@@ -750,6 +959,16 @@ fn parse_program_scoped_event(
     event_type_filter: Option<&EventTypeFilter>,
     is_created_buy: bool,
 ) -> Option<DexEvent> {
+    if let Some(filter) = event_type_filter {
+        if let Some(event_type) =
+            program_scoped_discriminator_to_event_type(program_id, discriminator)
+        {
+            if !filter.should_include(event_type) {
+                return None;
+            }
+        }
+    }
+
     match *program_id {
         program_ids::PUMPFUN_PROGRAM_ID => {
             if let Some(filter) = event_type_filter {
@@ -860,8 +1079,10 @@ fn parse_program_scoped_event(
             }
         }
         program_ids::RAYDIUM_CLMM_PROGRAM_ID => {
-            if !filter_allows_untyped_protocol(event_type_filter) {
-                return None;
+            if let Some(filter) = event_type_filter {
+                if !filter.includes_raydium_clmm() {
+                    return None;
+                }
             }
             match discriminator {
                 discriminators::RAYDIUM_CLMM_SWAP => {
@@ -883,8 +1104,10 @@ fn parse_program_scoped_event(
             }
         }
         program_ids::RAYDIUM_CPMM_PROGRAM_ID => {
-            if !filter_allows_untyped_protocol(event_type_filter) {
-                return None;
+            if let Some(filter) = event_type_filter {
+                if !filter.includes_raydium_cpmm() {
+                    return None;
+                }
             }
             match discriminator {
                 discriminators::RAYDIUM_CPMM_SWAP_BASE_IN => {
@@ -906,8 +1129,10 @@ fn parse_program_scoped_event(
             }
         }
         program_ids::RAYDIUM_AMM_V4_PROGRAM_ID => {
-            if !filter_allows_untyped_protocol(event_type_filter) {
-                return None;
+            if let Some(filter) = event_type_filter {
+                if !filter.includes_raydium_amm_v4() {
+                    return None;
+                }
             }
             match discriminator {
                 discriminators::RAYDIUM_AMM_SWAP_BASE_IN => {
@@ -925,12 +1150,17 @@ fn parse_program_scoped_event(
                 discriminators::RAYDIUM_AMM_INITIALIZE2 => {
                     crate::logs::raydium_amm::parse_initialize2_from_data(data, metadata)
                 }
+                discriminators::RAYDIUM_AMM_WITHDRAW_PNL => {
+                    crate::logs::raydium_amm::parse_withdraw_pnl_from_data(data, metadata)
+                }
                 _ => None,
             }
         }
         program_ids::ORCA_WHIRLPOOL_PROGRAM_ID => {
-            if !filter_allows_untyped_protocol(event_type_filter) {
-                return None;
+            if let Some(filter) = event_type_filter {
+                if !filter.includes_orca_whirlpool() {
+                    return None;
+                }
             }
             match discriminator {
                 discriminators::ORCA_TRADED => {
@@ -949,8 +1179,10 @@ fn parse_program_scoped_event(
             }
         }
         program_ids::METEORA_POOLS_PROGRAM_ID => {
-            if !filter_allows_untyped_protocol(event_type_filter) {
-                return None;
+            if let Some(filter) = event_type_filter {
+                if !filter.includes_meteora_pools() {
+                    return None;
+                }
             }
             match discriminator {
                 discriminators::METEORA_AMM_SWAP => {
@@ -968,6 +1200,9 @@ fn parse_program_scoped_event(
                 discriminators::METEORA_AMM_POOL_CREATED => {
                     crate::logs::meteora_amm::parse_pool_created_from_data(data, metadata)
                 }
+                discriminators::METEORA_AMM_SET_POOL_FEES => {
+                    crate::logs::meteora_amm::parse_set_pool_fees_from_data(data, metadata)
+                }
                 _ => None,
             }
         }
@@ -977,27 +1212,61 @@ fn parse_program_scoped_event(
                     return None;
                 }
             }
-            crate::logs::parse_meteora_damm_log(
-                log,
-                signature,
-                slot,
-                tx_index,
-                block_time_us,
-                grpc_recv_us,
-            )
+            match discriminator {
+                discriminators::METEORA_DAMM_SWAP => {
+                    crate::logs::meteora_damm::parse_swap_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_SWAP2 => {
+                    crate::logs::meteora_damm::parse_swap2_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_ADD_LIQUIDITY => {
+                    crate::logs::meteora_damm::parse_add_liquidity_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_REMOVE_LIQUIDITY => {
+                    crate::logs::meteora_damm::parse_remove_liquidity_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_CREATE_POSITION => {
+                    crate::logs::meteora_damm::parse_create_position_from_data(data, metadata)
+                }
+                discriminators::METEORA_DAMM_CLOSE_POSITION => {
+                    crate::logs::meteora_damm::parse_close_position_from_data(data, metadata)
+                }
+                _ => None,
+            }
         }
         program_ids::METEORA_DLMM_PROGRAM_ID => {
-            if !filter_allows_untyped_protocol(event_type_filter) {
-                return None;
+            if let Some(filter) = event_type_filter {
+                if !filter.includes_meteora_dlmm() {
+                    return None;
+                }
             }
-            crate::logs::parse_meteora_dlmm_log(
-                log,
-                signature,
-                slot,
-                tx_index,
-                block_time_us,
-                grpc_recv_us,
-            )
+            match discriminator {
+                discriminators::METEORA_DLMM_SWAP => {
+                    crate::logs::meteora_dlmm::parse_swap_from_data(data, metadata)
+                }
+                discriminators::METEORA_DLMM_ADD_LIQUIDITY => {
+                    crate::logs::meteora_dlmm::parse_add_liquidity_from_data(data, metadata)
+                }
+                discriminators::METEORA_DLMM_REMOVE_LIQUIDITY => {
+                    crate::logs::meteora_dlmm::parse_remove_liquidity_from_data(data, metadata)
+                }
+                discriminators::METEORA_DLMM_INITIALIZE_POOL => {
+                    crate::logs::meteora_dlmm::parse_initialize_pool_from_data(data, metadata)
+                }
+                discriminators::METEORA_DLMM_INITIALIZE_BIN_ARRAY => {
+                    crate::logs::meteora_dlmm::parse_initialize_bin_array_from_data(data, metadata)
+                }
+                discriminators::METEORA_DLMM_CREATE_POSITION => {
+                    crate::logs::meteora_dlmm::parse_create_position_from_data(data, metadata)
+                }
+                discriminators::METEORA_DLMM_CLOSE_POSITION => {
+                    crate::logs::meteora_dlmm::parse_close_position_from_data(data, metadata)
+                }
+                discriminators::METEORA_DLMM_CLAIM_FEE => {
+                    crate::logs::meteora_dlmm::parse_claim_fee_from_data(data, metadata)
+                }
+                _ => None,
+            }
         }
         _ => None,
     }
@@ -1010,16 +1279,17 @@ fn filter_pumpfun_trade_variant(
 ) -> Option<DexEvent> {
     if let Some(filter) = event_type_filter {
         if let Some(ref include_only) = filter.include_only {
-            let has_specific_filter = include_only.iter().any(|t| {
-                matches!(
-                    t,
-                    EventType::PumpFunBuy
-                        | EventType::PumpFunSell
-                        | EventType::PumpFunBuyExactSolIn
-                        | EventType::PumpFunCreate
-                        | EventType::PumpFunCreateV2
-                )
-            });
+            let has_specific_filter = !include_only.contains(&EventType::PumpFunTrade)
+                && include_only.iter().any(|t| {
+                    matches!(
+                        t,
+                        EventType::PumpFunBuy
+                            | EventType::PumpFunSell
+                            | EventType::PumpFunBuyExactSolIn
+                            | EventType::PumpFunCreate
+                            | EventType::PumpFunCreateV2
+                    )
+                });
             if has_specific_filter {
                 let event_type_matches = match &event {
                     DexEvent::PumpFunBuy(_) => include_only.contains(&EventType::PumpFunBuy),
@@ -1038,6 +1308,9 @@ fn filter_pumpfun_trade_variant(
                     return None;
                 }
             }
+        }
+        if filter.exclude_types.is_some() && !filter.should_include_dex_event(&event) {
+            return None;
         }
     }
     Some(event)
@@ -1077,6 +1350,57 @@ fn discriminator_to_event_type(discriminator: u64) -> Option<EventType> {
         discriminators::PUMPSWAP_CREATE_POOL => Some(EventType::PumpSwapCreatePool),
         discriminators::PUMPSWAP_ADD_LIQUIDITY => Some(EventType::PumpSwapLiquidityAdded),
         discriminators::PUMPSWAP_REMOVE_LIQUIDITY => Some(EventType::PumpSwapLiquidityRemoved),
+        discriminators::RAYDIUM_LAUNCHPAD_POOL_CREATE => Some(EventType::BonkPoolCreate),
+        discriminators::RAYDIUM_CLMM_SWAP => Some(EventType::RaydiumClmmSwap),
+        discriminators::RAYDIUM_CLMM_INCREASE_LIQUIDITY => {
+            Some(EventType::RaydiumClmmIncreaseLiquidity)
+        }
+        discriminators::RAYDIUM_CLMM_DECREASE_LIQUIDITY => {
+            Some(EventType::RaydiumClmmDecreaseLiquidity)
+        }
+        discriminators::RAYDIUM_CLMM_CREATE_POOL => Some(EventType::RaydiumClmmCreatePool),
+        discriminators::RAYDIUM_CLMM_COLLECT_FEE => Some(EventType::RaydiumClmmCollectFee),
+        discriminators::RAYDIUM_CPMM_SWAP_BASE_IN | discriminators::RAYDIUM_CPMM_SWAP_BASE_OUT => {
+            Some(EventType::RaydiumCpmmSwap)
+        }
+        discriminators::RAYDIUM_CPMM_DEPOSIT => Some(EventType::RaydiumCpmmDeposit),
+        discriminators::RAYDIUM_CPMM_WITHDRAW => Some(EventType::RaydiumCpmmWithdraw),
+        discriminators::RAYDIUM_AMM_SWAP_BASE_IN | discriminators::RAYDIUM_AMM_SWAP_BASE_OUT => {
+            Some(EventType::RaydiumAmmV4Swap)
+        }
+        discriminators::RAYDIUM_AMM_DEPOSIT => Some(EventType::RaydiumAmmV4Deposit),
+        discriminators::RAYDIUM_AMM_WITHDRAW => Some(EventType::RaydiumAmmV4Withdraw),
+        discriminators::RAYDIUM_AMM_INITIALIZE2 => Some(EventType::RaydiumAmmV4Initialize2),
+        discriminators::RAYDIUM_AMM_WITHDRAW_PNL => Some(EventType::RaydiumAmmV4WithdrawPnl),
+        discriminators::ORCA_TRADED => Some(EventType::OrcaWhirlpoolSwap),
+        discriminators::ORCA_LIQUIDITY_INCREASED => {
+            Some(EventType::OrcaWhirlpoolLiquidityIncreased)
+        }
+        discriminators::ORCA_LIQUIDITY_DECREASED => {
+            Some(EventType::OrcaWhirlpoolLiquidityDecreased)
+        }
+        discriminators::ORCA_POOL_INITIALIZED => Some(EventType::OrcaWhirlpoolPoolInitialized),
+        discriminators::METEORA_AMM_SWAP => Some(EventType::MeteoraPoolsSwap),
+        discriminators::METEORA_AMM_ADD_LIQUIDITY => Some(EventType::MeteoraPoolsAddLiquidity),
+        discriminators::METEORA_AMM_REMOVE_LIQUIDITY => {
+            Some(EventType::MeteoraPoolsRemoveLiquidity)
+        }
+        discriminators::METEORA_AMM_BOOTSTRAP_LIQUIDITY => {
+            Some(EventType::MeteoraPoolsBootstrapLiquidity)
+        }
+        discriminators::METEORA_AMM_POOL_CREATED => Some(EventType::MeteoraPoolsPoolCreated),
+        discriminators::METEORA_AMM_SET_POOL_FEES => Some(EventType::MeteoraPoolsSetPoolFees),
+        discriminators::METEORA_DAMM_SWAP | discriminators::METEORA_DAMM_SWAP2 => {
+            Some(EventType::MeteoraDammV2Swap)
+        }
+        discriminators::METEORA_DAMM_ADD_LIQUIDITY => Some(EventType::MeteoraDammV2AddLiquidity),
+        discriminators::METEORA_DAMM_REMOVE_LIQUIDITY => {
+            Some(EventType::MeteoraDammV2RemoveLiquidity)
+        }
+        discriminators::METEORA_DAMM_CREATE_POSITION => {
+            Some(EventType::MeteoraDammV2CreatePosition)
+        }
+        discriminators::METEORA_DAMM_CLOSE_POSITION => Some(EventType::MeteoraDammV2ClosePosition),
         _ => None,
     }
 }
@@ -1152,6 +1476,7 @@ pub fn parse_program_complete_info(log: &str) -> Option<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::events::PumpFunTradeEvent;
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
@@ -1193,6 +1518,286 @@ mod tests {
                 assert!(trade.exact_in);
             }
             other => panic!("expected BonkTrade, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn program_scoped_dlmm_initialize_bin_array_parses_and_filters() {
+        let pool = Pubkey::new_unique();
+        let bin_array = Pubkey::new_unique();
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&discriminators::METEORA_DLMM_INITIALIZE_BIN_ARRAY.to_le_bytes());
+        raw.extend_from_slice(pool.as_ref());
+        raw.extend_from_slice(bin_array.as_ref());
+        raw.extend_from_slice(&(-12i64).to_le_bytes());
+
+        let log = format!("Program data: {}", STANDARD.encode(raw));
+        let matching_filter =
+            EventTypeFilter::include_only(vec![EventType::MeteoraDlmmInitializeBinArray]);
+        let event = parse_log_optimized_with_program_id(
+            &log,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+            4,
+            Some(&matching_filter),
+            false,
+            None,
+            Some(&program_ids::METEORA_DLMM_PROGRAM_ID),
+        )
+        .expect("DLMM initialize bin array should parse");
+
+        match event {
+            DexEvent::MeteoraDlmmInitializeBinArray(event) => {
+                assert_eq!(event.pool, pool);
+                assert_eq!(event.bin_array, bin_array);
+                assert_eq!(event.index, -12);
+            }
+            other => panic!("expected MeteoraDlmmInitializeBinArray, got {other:?}"),
+        }
+
+        let non_matching_filter = EventTypeFilter::include_only(vec![EventType::MeteoraDlmmSwap]);
+        assert!(parse_log_optimized_with_program_id(
+            &log,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+            4,
+            Some(&non_matching_filter),
+            false,
+            None,
+            Some(&program_ids::METEORA_DLMM_PROGRAM_ID),
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn pumpfun_trade_filter_remains_generic_when_combined_with_specific_type() {
+        let filter =
+            EventTypeFilter::include_only(vec![EventType::PumpFunTrade, EventType::PumpFunBuy]);
+        let event = DexEvent::PumpFunSell(PumpFunTradeEvent {
+            metadata: EventMetadata::default(),
+            is_buy: false,
+            ix_name: "sell".to_string(),
+            ..Default::default()
+        });
+
+        assert!(filter_pumpfun_trade_variant(event, Some(&filter)).is_some());
+    }
+
+    #[test]
+    fn discriminator_prefix_filter_handles_program_scoped_collisions() {
+        let dlmm_filter = EventTypeFilter::include_only(vec![EventType::MeteoraDlmmSwap]);
+        assert!(filter_allows_discriminator(
+            Some(&program_ids::METEORA_DLMM_PROGRAM_ID),
+            discriminators::METEORA_DLMM_SWAP,
+            Some(&dlmm_filter),
+        ));
+        assert!(!filter_allows_discriminator(
+            Some(&program_ids::RAYDIUM_CPMM_PROGRAM_ID),
+            discriminators::METEORA_DLMM_SWAP,
+            Some(&dlmm_filter),
+        ));
+
+        let bonk_filter = EventTypeFilter::include_only(vec![EventType::BonkTrade]);
+        assert!(filter_allows_discriminator(
+            Some(&program_ids::BONK_PROGRAM_ID),
+            discriminators::RAYDIUM_LAUNCHPAD_TRADE,
+            Some(&bonk_filter),
+        ));
+        assert!(!filter_allows_discriminator(
+            Some(&program_ids::PUMPFUN_PROGRAM_ID),
+            discriminators::PUMPFUN_TRADE,
+            Some(&bonk_filter),
+        ));
+    }
+
+    #[test]
+    fn discriminator_prefix_filter_keeps_unscoped_collision_candidates() {
+        let dlmm_filter = EventTypeFilter::include_only(vec![EventType::MeteoraDlmmSwap]);
+        assert!(filter_allows_discriminator(
+            None,
+            discriminators::METEORA_DLMM_SWAP,
+            Some(&dlmm_filter),
+        ));
+
+        let cpmm_filter = EventTypeFilter::include_only(vec![EventType::RaydiumCpmmInitialize]);
+        assert!(filter_allows_discriminator(
+            None,
+            discriminators::RAYDIUM_CPMM_CREATE_POOL,
+            Some(&cpmm_filter),
+        ));
+    }
+
+    #[test]
+    fn unscoped_collision_does_not_emit_wrong_protocol_event_after_filter() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&discriminators::METEORA_DLMM_SWAP.to_le_bytes());
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // CPMM pool_state shape
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // CPMM user shape
+        raw.extend_from_slice(&1u64.to_le_bytes());
+        raw.extend_from_slice(&2u64.to_le_bytes());
+        raw.extend_from_slice(&3u64.to_le_bytes());
+        raw.push(1);
+
+        let log = format!("Program data: {}", STANDARD.encode(raw));
+        let filter = EventTypeFilter::include_only(vec![EventType::MeteoraDlmmSwap]);
+        assert!(parse_log_optimized(
+            &log,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+            4,
+            Some(&filter),
+            false,
+            None,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn unscoped_pumpfun_launchpad_collision_does_not_emit_wrong_protocol_event() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&discriminators::PUMPFUN_TRADE.to_le_bytes());
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // mint
+        raw.extend_from_slice(&1u64.to_le_bytes()); // sol_amount
+        raw.extend_from_slice(&2u64.to_le_bytes()); // token_amount
+        raw.push(1); // is_buy
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // user
+        raw.extend_from_slice(&3i64.to_le_bytes()); // timestamp
+        for value in 4u64..=9 {
+            raw.extend_from_slice(&value.to_le_bytes());
+        }
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // fee_recipient
+        raw.extend_from_slice(&10u64.to_le_bytes()); // fee_basis_points
+        raw.extend_from_slice(&11u64.to_le_bytes()); // fee
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // creator
+        raw.extend_from_slice(&12u64.to_le_bytes()); // creator_fee_basis_points
+        raw.extend_from_slice(&13u64.to_le_bytes()); // creator_fee
+
+        let log = format!("Program data: {}", STANDARD.encode(raw));
+        let filter = EventTypeFilter::include_only(vec![EventType::BonkTrade]);
+        assert!(parse_log_optimized(
+            &log,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+            4,
+            Some(&filter),
+            false,
+            None,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn discriminator_prefix_decode_reads_first_event_bytes() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&discriminators::PUMP_FEES_UPDATE_ADMIN.to_le_bytes());
+        raw.extend_from_slice(Pubkey::new_unique().as_ref());
+        raw.extend_from_slice(Pubkey::new_unique().as_ref());
+
+        let encoded = STANDARD.encode(raw);
+        assert_eq!(
+            decode_base64_discriminator(&encoded),
+            Some(discriminators::PUMP_FEES_UPDATE_ADMIN)
+        );
+    }
+
+    #[test]
+    fn program_scoped_damm_add_liquidity_parses_from_decoded_data() {
+        let pool = Pubkey::new_unique();
+        let position = Pubkey::new_unique();
+        let owner = Pubkey::new_unique();
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&discriminators::METEORA_DAMM_ADD_LIQUIDITY.to_le_bytes());
+        raw.extend_from_slice(pool.as_ref());
+        raw.extend_from_slice(position.as_ref());
+        raw.extend_from_slice(owner.as_ref());
+        raw.extend_from_slice(&123u128.to_le_bytes());
+        raw.extend_from_slice(&10u64.to_le_bytes());
+        raw.extend_from_slice(&20u64.to_le_bytes());
+        raw.extend_from_slice(&30u64.to_le_bytes());
+        raw.extend_from_slice(&40u64.to_le_bytes());
+        raw.extend_from_slice(&50u64.to_le_bytes());
+        raw.extend_from_slice(&60u64.to_le_bytes());
+
+        let log = format!("Program data: {}", STANDARD.encode(raw));
+        let filter = EventTypeFilter::include_only(vec![EventType::MeteoraDammV2AddLiquidity]);
+        let event = parse_log_optimized_with_program_id(
+            &log,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+            4,
+            Some(&filter),
+            false,
+            None,
+            Some(&program_ids::METEORA_DAMM_V2_PROGRAM_ID),
+        )
+        .expect("DAMM V2 add-liquidity should parse");
+
+        match event {
+            DexEvent::MeteoraDammV2AddLiquidity(event) => {
+                assert_eq!(event.pool, pool);
+                assert_eq!(event.position, position);
+                assert_eq!(event.owner, owner);
+                assert_eq!(event.liquidity_delta, 123);
+                assert_eq!(event.token_a_amount, 30);
+                assert_eq!(event.token_b_amount, 40);
+                assert_eq!(event.total_amount_a, 50);
+                assert_eq!(event.total_amount_b, 60);
+            }
+            other => panic!("expected MeteoraDammV2AddLiquidity, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn large_program_data_uses_heap_fallback_without_dropping_event() {
+        let mut raw = Vec::new();
+        raw.extend_from_slice(&discriminators::PUMP_FEES_CREATE_FEE_SHARING_CONFIG.to_le_bytes());
+        raw.extend_from_slice(&1_777_920_719i64.to_le_bytes());
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // mint
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // bonding_curve
+        raw.push(0); // pool: None
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // sharing_config
+        raw.extend_from_slice(Pubkey::new_unique().as_ref()); // admin
+        raw.extend_from_slice(&64u32.to_le_bytes());
+        for i in 0..64u16 {
+            raw.extend_from_slice(Pubkey::new_unique().as_ref());
+            raw.extend_from_slice(&i.to_le_bytes());
+        }
+        raw.push(1); // PumpFeesConfigStatus::Active
+
+        let encoded = STANDARD.encode(&raw);
+        assert!(encoded.len() > 2700, "test must exceed the old fixed stack buffer limit");
+        let log = format!("Program data: {encoded}");
+
+        let event = parse_log_optimized_with_program_id(
+            &log,
+            Signature::default(),
+            1,
+            2,
+            Some(3),
+            4,
+            None,
+            false,
+            None,
+            Some(&program_ids::PUMP_FEES_PROGRAM_ID),
+        )
+        .expect("large pump-fees event should parse via heap fallback");
+
+        match event {
+            DexEvent::PumpFeesCreateFeeSharingConfig(event) => {
+                assert_eq!(event.initial_shareholders.len(), 64);
+                assert_eq!(event.status, crate::core::events::PumpFeesConfigStatus::Active);
+            }
+            other => panic!("expected PumpFeesCreateFeeSharingConfig, got {other:?}"),
         }
     }
 

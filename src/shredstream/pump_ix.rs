@@ -4,8 +4,7 @@
 //! - 避免每笔交易克隆整张 `static_account_keys`、避免 `Vec<IxRef>` 指令副本。
 //! - Pump.fun 使用专用外层热路径；其它已支持 DEX 协议走统一指令解析入口。
 
-use std::collections::HashSet;
-
+use smallvec::SmallVec;
 use solana_sdk::message::VersionedMessage;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
@@ -16,6 +15,7 @@ use crate::core::events::{
     DexEvent, EventMetadata, PumpFunCreateTokenEvent, PumpFunCreateV2TokenEvent,
     PumpFunMigrateBondingCurveCreatorEvent, PumpFunTradeEvent,
 };
+use crate::grpc::types::EventTypeFilter;
 use crate::instr::program_ids::{
     BONK_PROGRAM_ID, METEORA_DAMM_V2_PROGRAM_ID, METEORA_DLMM_PROGRAM_ID, METEORA_POOLS_PROGRAM_ID,
     ORCA_WHIRLPOOL_PROGRAM_ID, PUMPSWAP_PROGRAM_ID, PUMP_FEES_PROGRAM_ID,
@@ -26,7 +26,15 @@ use crate::instr::pump::PROGRAM_ID_PUBKEY;
 use crate::instr::utils::{
     read_bool, read_option_bool_idl, read_pubkey, read_str_unchecked, read_u64_le,
 };
-use smallvec::SmallVec;
+
+type PumpMintSet = SmallVec<[Pubkey; 4]>;
+
+#[inline(always)]
+fn push_unique_mint(mints: &mut PumpMintSet, mint: Pubkey) {
+    if !mints.iter().any(|existing| *existing == mint) {
+        mints.push(mint);
+    }
+}
 
 #[inline(always)]
 fn token_program_or_default(token_program: Pubkey) -> Pubkey {
@@ -43,8 +51,8 @@ fn scan_create_mint_from_ix(
     ix_accounts: &[u8],
     data: &[u8],
     static_keys: &[Pubkey],
-    created_mints: &mut HashSet<Pubkey>,
-    mayhem_mints: &mut HashSet<Pubkey>,
+    created_mints: &mut PumpMintSet,
+    mayhem_mints: &mut PumpMintSet,
 ) {
     let Some(program_id) = static_keys.get(program_id_index as usize) else {
         return;
@@ -62,13 +70,13 @@ fn scan_create_mint_from_ix(
     let Some(&mint) = static_keys.get(mint_idx as usize) else {
         return;
     };
-    created_mints.insert(mint);
+    push_unique_mint(created_mints, mint);
     if disc == discriminators::CREATE_V2 {
         let is_mayhem = crate::instr::utils::parse_create_v2_tail_fields(&data[8..])
             .map(|(_, m, _)| m)
             .unwrap_or(false);
         if is_mayhem {
-            mayhem_mints.insert(mint);
+            push_unique_mint(mayhem_mints, mint);
         }
     }
 }
@@ -78,9 +86,9 @@ fn scan_create_mint_from_ix(
 fn detect_pumpfun_create_mints(
     message: &VersionedMessage,
     static_keys: &[Pubkey],
-) -> (HashSet<Pubkey>, HashSet<Pubkey>) {
-    let mut created_mints = HashSet::new();
-    let mut mayhem_mints = HashSet::new();
+) -> (PumpMintSet, PumpMintSet) {
+    let mut created_mints = PumpMintSet::new();
+    let mut mayhem_mints = PumpMintSet::new();
     match message {
         VersionedMessage::Legacy(msg) => {
             for ix in &msg.instructions {
@@ -110,7 +118,7 @@ fn detect_pumpfun_create_mints(
     (created_mints, mayhem_mints)
 }
 
-/// Pump.fun 外层或 pump_fees `create_fee_sharing_config` 外层，保持与交易内 ix 顺序一致。
+/// DEX 外层指令解析，保持与交易内 ix 顺序一致。
 #[inline]
 fn dispatch_shred_outer(
     program_id_index: u8,
@@ -121,14 +129,18 @@ fn dispatch_shred_outer(
     slot: u64,
     tx_index: u64,
     recv_us: i64,
-    created_mints: &HashSet<Pubkey>,
-    mayhem_mints: &HashSet<Pubkey>,
+    filter: Option<&EventTypeFilter>,
+    created_mints: &PumpMintSet,
+    mayhem_mints: &PumpMintSet,
     events: &mut Vec<DexEvent>,
 ) {
     let Some(program_id) = static_keys.get(program_id_index as usize) else {
         return;
     };
     if *program_id == PROGRAM_ID_PUBKEY {
+        if filter.is_some_and(|f| !f.includes_pumpfun()) {
+            return;
+        }
         if let Some(ev) = parse_pumpfun_instruction(
             data,
             static_keys,
@@ -140,25 +152,13 @@ fn dispatch_shred_outer(
             created_mints,
             mayhem_mints,
         ) {
-            events.push(ev);
+            if filter.map(|f| f.should_include_dex_event(&ev)).unwrap_or(true) {
+                events.push(ev);
+            }
         }
         return;
     }
-    if *program_id == PUMP_FEES_PROGRAM_ID {
-        super::pfees_ix::try_push_pump_fees_outer_if_applicable(
-            program_id_index,
-            data,
-            ix_accounts,
-            static_keys,
-            signature,
-            slot,
-            tx_index,
-            recv_us,
-            events,
-        );
-        return;
-    }
-    if !is_supported_unified_outer_program(program_id) {
+    if !is_supported_unified_outer_program(program_id, filter) {
         return;
     }
     if let Some(ev) = parse_non_pump_dex_outer(
@@ -170,25 +170,56 @@ fn dispatch_shred_outer(
         slot,
         tx_index,
         recv_us,
+        filter,
     ) {
         events.push(ev);
     }
 }
 
 #[inline(always)]
-fn is_supported_unified_outer_program(program_id: &Pubkey) -> bool {
-    matches!(
-        *program_id,
-        PUMPSWAP_PROGRAM_ID
-            | BONK_PROGRAM_ID
-            | RAYDIUM_CPMM_PROGRAM_ID
-            | RAYDIUM_CLMM_PROGRAM_ID
-            | RAYDIUM_AMM_V4_PROGRAM_ID
-            | ORCA_WHIRLPOOL_PROGRAM_ID
-            | METEORA_POOLS_PROGRAM_ID
-            | METEORA_DAMM_V2_PROGRAM_ID
-            | METEORA_DLMM_PROGRAM_ID
-    )
+fn is_supported_unified_outer_program(
+    program_id: &Pubkey,
+    filter: Option<&EventTypeFilter>,
+) -> bool {
+    let Some(f) = filter else {
+        return matches!(
+            *program_id,
+            PUMPSWAP_PROGRAM_ID
+                | PUMP_FEES_PROGRAM_ID
+                | BONK_PROGRAM_ID
+                | RAYDIUM_CPMM_PROGRAM_ID
+                | RAYDIUM_CLMM_PROGRAM_ID
+                | RAYDIUM_AMM_V4_PROGRAM_ID
+                | ORCA_WHIRLPOOL_PROGRAM_ID
+                | METEORA_POOLS_PROGRAM_ID
+                | METEORA_DAMM_V2_PROGRAM_ID
+                | METEORA_DLMM_PROGRAM_ID
+        );
+    };
+
+    if *program_id == PUMPSWAP_PROGRAM_ID {
+        f.includes_pumpswap()
+    } else if *program_id == PUMP_FEES_PROGRAM_ID {
+        f.includes_pump_fees()
+    } else if *program_id == BONK_PROGRAM_ID {
+        f.includes_raydium_launchpad()
+    } else if *program_id == RAYDIUM_CPMM_PROGRAM_ID {
+        f.includes_raydium_cpmm()
+    } else if *program_id == RAYDIUM_CLMM_PROGRAM_ID {
+        f.includes_raydium_clmm()
+    } else if *program_id == RAYDIUM_AMM_V4_PROGRAM_ID {
+        f.includes_raydium_amm_v4()
+    } else if *program_id == ORCA_WHIRLPOOL_PROGRAM_ID {
+        f.includes_orca_whirlpool()
+    } else if *program_id == METEORA_POOLS_PROGRAM_ID {
+        f.includes_meteora_pools()
+    } else if *program_id == METEORA_DAMM_V2_PROGRAM_ID {
+        f.includes_meteora_damm_v2()
+    } else if *program_id == METEORA_DLMM_PROGRAM_ID {
+        f.includes_meteora_dlmm()
+    } else {
+        false
+    }
 }
 
 #[inline]
@@ -201,6 +232,7 @@ fn parse_non_pump_dex_outer(
     slot: u64,
     tx_index: u64,
     recv_us: i64,
+    filter: Option<&EventTypeFilter>,
 ) -> Option<DexEvent> {
     let mut accounts: SmallVec<[Pubkey; 64]> = SmallVec::new();
     for &idx in ix_accounts {
@@ -214,13 +246,13 @@ fn parse_non_pump_dex_outer(
         tx_index,
         None,
         recv_us,
-        None,
+        filter,
         &program_id,
     )
 }
 
 #[inline]
-pub(crate) fn parse_transaction_dex_events(
+pub fn parse_transaction_dex_events(
     transaction: &VersionedTransaction,
     signature: Signature,
     slot: u64,
@@ -228,17 +260,46 @@ pub(crate) fn parse_transaction_dex_events(
     recv_us: i64,
     events: &mut Vec<DexEvent>,
 ) {
-    parse_transaction_pump_events(transaction, signature, slot, tx_index, recv_us, events);
+    parse_transaction_dex_events_with_filter(
+        transaction,
+        signature,
+        slot,
+        tx_index,
+        recv_us,
+        None,
+        events,
+    );
 }
 
-/// 解析交易中的 DEX 外层指令并写入 `events`（调用前 `events` 应已 `clear` 或按需复用容量）。
 #[inline]
-pub(crate) fn parse_transaction_pump_events(
+pub fn parse_transaction_dex_events_with_filter(
     transaction: &VersionedTransaction,
     signature: Signature,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
+    filter: Option<&EventTypeFilter>,
+    events: &mut Vec<DexEvent>,
+) {
+    parse_transaction_pump_events_with_filter(
+        transaction,
+        signature,
+        slot,
+        tx_index,
+        recv_us,
+        filter,
+        events,
+    );
+}
+
+#[inline]
+fn parse_transaction_pump_events_with_filter(
+    transaction: &VersionedTransaction,
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    recv_us: i64,
+    filter: Option<&EventTypeFilter>,
     events: &mut Vec<DexEvent>,
 ) {
     let static_keys = transaction.message.static_account_keys();
@@ -256,6 +317,7 @@ pub(crate) fn parse_transaction_pump_events(
                     slot,
                     tx_index,
                     recv_us,
+                    filter,
                     &created_mints,
                     &mayhem_mints,
                     events,
@@ -273,6 +335,7 @@ pub(crate) fn parse_transaction_pump_events(
                     slot,
                     tx_index,
                     recv_us,
+                    filter,
                     &created_mints,
                     &mayhem_mints,
                     events,
@@ -293,8 +356,8 @@ fn parse_pumpfun_instruction(
     slot: u64,
     tx_index: u64,
     recv_us: i64,
-    created_mints: &HashSet<Pubkey>,
-    mayhem_mints: &HashSet<Pubkey>,
+    created_mints: &PumpMintSet,
+    mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     if data.len() < 8 {
         return None;
@@ -611,8 +674,8 @@ fn parse_buy_instruction(
     slot: u64,
     tx_index: u64,
     recv_us: i64,
-    created_mints: &HashSet<Pubkey>,
-    mayhem_mints: &HashSet<Pubkey>,
+    created_mints: &PumpMintSet,
+    mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     if ix_accounts.len() < 7 {
         return None;
@@ -758,8 +821,8 @@ fn parse_buy_exact_sol_in_instruction(
     slot: u64,
     tx_index: u64,
     recv_us: i64,
-    created_mints: &HashSet<Pubkey>,
-    mayhem_mints: &HashSet<Pubkey>,
+    created_mints: &PumpMintSet,
+    mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     if ix_accounts.len() < 7 {
         return None;
@@ -835,8 +898,8 @@ fn parse_buy_v2_instruction(
     slot: u64,
     tx_index: u64,
     recv_us: i64,
-    created_mints: &HashSet<Pubkey>,
-    mayhem_mints: &HashSet<Pubkey>,
+    created_mints: &PumpMintSet,
+    mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     const MIN_ACC: usize = 27;
     if ix_accounts.len() < MIN_ACC {
@@ -912,8 +975,8 @@ fn parse_buy_exact_quote_in_v2_instruction(
     slot: u64,
     tx_index: u64,
     recv_us: i64,
-    created_mints: &HashSet<Pubkey>,
-    mayhem_mints: &HashSet<Pubkey>,
+    created_mints: &PumpMintSet,
+    mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     const MIN_ACC: usize = 27;
     if ix_accounts.len() < MIN_ACC {
@@ -1052,4 +1115,42 @@ fn parse_sell_v2_instruction(
         creator_vault: get_account(16).unwrap_or_default(),
         account: None,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unified_shred_outer_programs_cover_supported_protocols() {
+        for program_id in [
+            PUMPSWAP_PROGRAM_ID,
+            PUMP_FEES_PROGRAM_ID,
+            BONK_PROGRAM_ID,
+            RAYDIUM_CPMM_PROGRAM_ID,
+            RAYDIUM_CLMM_PROGRAM_ID,
+            RAYDIUM_AMM_V4_PROGRAM_ID,
+            ORCA_WHIRLPOOL_PROGRAM_ID,
+            METEORA_POOLS_PROGRAM_ID,
+            METEORA_DAMM_V2_PROGRAM_ID,
+            METEORA_DLMM_PROGRAM_ID,
+        ] {
+            assert!(
+                is_supported_unified_outer_program(&program_id, None),
+                "ShredStream outer parser missing {program_id}"
+            );
+        }
+    }
+
+    #[test]
+    fn unified_shred_outer_program_filter_skips_unrequested_protocols() {
+        let raydium_only =
+            EventTypeFilter::include_only(vec![crate::grpc::types::EventType::RaydiumCpmmSwap]);
+
+        assert!(is_supported_unified_outer_program(&RAYDIUM_CPMM_PROGRAM_ID, Some(&raydium_only)));
+        assert!(!is_supported_unified_outer_program(
+            &ORCA_WHIRLPOOL_PROGRAM_ID,
+            Some(&raydium_only)
+        ));
+    }
 }

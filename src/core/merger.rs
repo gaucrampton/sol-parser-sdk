@@ -44,8 +44,29 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         (PumpFunCreate(b), PumpFunCreate(i)) => merge_pumpfun_create(b, i),
         (PumpFunCreateV2(b), PumpFunCreateV2(i)) => merge_generic(b, i),
         (PumpFunMigrate(b), PumpFunMigrate(i)) => merge_pumpfun_migrate(b, i),
+        (PumpFunMigrateBondingCurveCreator(b), PumpFunMigrateBondingCurveCreator(i)) => {
+            merge_generic(b, i)
+        }
+
+        // ========== PumpFees 系列 ==========
+        (PumpFeesCreateFeeSharingConfig(b), PumpFeesCreateFeeSharingConfig(i)) => {
+            merge_generic(b, i)
+        }
+        (PumpFeesInitializeFeeConfig(b), PumpFeesInitializeFeeConfig(i)) => merge_generic(b, i),
+        (PumpFeesResetFeeSharingConfig(b), PumpFeesResetFeeSharingConfig(i)) => merge_generic(b, i),
+        (PumpFeesRevokeFeeSharingAuthority(b), PumpFeesRevokeFeeSharingAuthority(i)) => {
+            merge_generic(b, i)
+        }
+        (PumpFeesTransferFeeSharingAuthority(b), PumpFeesTransferFeeSharingAuthority(i)) => {
+            merge_generic(b, i)
+        }
+        (PumpFeesUpdateAdmin(b), PumpFeesUpdateAdmin(i)) => merge_generic(b, i),
+        (PumpFeesUpdateFeeConfig(b), PumpFeesUpdateFeeConfig(i)) => merge_generic(b, i),
+        (PumpFeesUpdateFeeShares(b), PumpFeesUpdateFeeShares(i)) => merge_generic(b, i),
+        (PumpFeesUpsertFeeTiers(b), PumpFeesUpsertFeeTiers(i)) => merge_generic(b, i),
 
         // ========== PumpSwap 系列 ==========
+        (PumpSwapTrade(b), PumpSwapTrade(i)) => merge_generic(b, i),
         (PumpSwapBuy(b), PumpSwapBuy(i)) => merge_generic(b, i),
         (PumpSwapSell(b), PumpSwapSell(i)) => merge_generic(b, i),
         (PumpSwapCreatePool(b), PumpSwapCreatePool(i)) => merge_generic(b, i),
@@ -57,17 +78,25 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         (RaydiumClmmIncreaseLiquidity(b), RaydiumClmmIncreaseLiquidity(i)) => merge_generic(b, i),
         (RaydiumClmmDecreaseLiquidity(b), RaydiumClmmDecreaseLiquidity(i)) => merge_generic(b, i),
         (RaydiumClmmCreatePool(b), RaydiumClmmCreatePool(i)) => merge_generic(b, i),
+        (RaydiumClmmOpenPosition(b), RaydiumClmmOpenPosition(i)) => merge_generic(b, i),
+        (RaydiumClmmClosePosition(b), RaydiumClmmClosePosition(i)) => merge_generic(b, i),
+        (RaydiumClmmOpenPositionWithTokenExtNft(b), RaydiumClmmOpenPositionWithTokenExtNft(i)) => {
+            merge_generic(b, i)
+        }
         (RaydiumClmmCollectFee(b), RaydiumClmmCollectFee(i)) => merge_generic(b, i),
 
         // ========== Raydium CPMM 系列 ==========
         (RaydiumCpmmSwap(b), RaydiumCpmmSwap(i)) => merge_generic(b, i),
         (RaydiumCpmmDeposit(b), RaydiumCpmmDeposit(i)) => merge_generic(b, i),
         (RaydiumCpmmWithdraw(b), RaydiumCpmmWithdraw(i)) => merge_generic(b, i),
+        (RaydiumCpmmInitialize(b), RaydiumCpmmInitialize(i)) => merge_generic(b, i),
 
         // ========== Raydium AMM V4 系列 ==========
         (RaydiumAmmV4Swap(b), RaydiumAmmV4Swap(i)) => merge_generic(b, i),
         (RaydiumAmmV4Deposit(b), RaydiumAmmV4Deposit(i)) => merge_generic(b, i),
         (RaydiumAmmV4Withdraw(b), RaydiumAmmV4Withdraw(i)) => merge_generic(b, i),
+        (RaydiumAmmV4Initialize2(b), RaydiumAmmV4Initialize2(i)) => merge_generic(b, i),
+        (RaydiumAmmV4WithdrawPnl(b), RaydiumAmmV4WithdrawPnl(i)) => merge_generic(b, i),
 
         // ========== Orca Whirlpool 系列 ==========
         (OrcaWhirlpoolSwap(b), OrcaWhirlpoolSwap(i)) => merge_generic(b, i),
@@ -77,11 +106,17 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         (OrcaWhirlpoolLiquidityDecreased(b), OrcaWhirlpoolLiquidityDecreased(i)) => {
             merge_generic(b, i)
         }
+        (OrcaWhirlpoolPoolInitialized(b), OrcaWhirlpoolPoolInitialized(i)) => merge_generic(b, i),
 
         // ========== Meteora Pools (AMM) 系列 ==========
         (MeteoraPoolsSwap(b), MeteoraPoolsSwap(i)) => merge_generic(b, i),
         (MeteoraPoolsAddLiquidity(b), MeteoraPoolsAddLiquidity(i)) => merge_generic(b, i),
         (MeteoraPoolsRemoveLiquidity(b), MeteoraPoolsRemoveLiquidity(i)) => merge_generic(b, i),
+        (MeteoraPoolsBootstrapLiquidity(b), MeteoraPoolsBootstrapLiquidity(i)) => {
+            merge_generic(b, i)
+        }
+        (MeteoraPoolsPoolCreated(b), MeteoraPoolsPoolCreated(i)) => merge_generic(b, i),
+        (MeteoraPoolsSetPoolFees(b), MeteoraPoolsSetPoolFees(i)) => merge_generic(b, i),
 
         // ========== Meteora DAMM V2 系列 ==========
         (MeteoraDammV2Swap(b), MeteoraDammV2Swap(i)) => merge_generic(b, i),
@@ -90,8 +125,20 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         (MeteoraDammV2CreatePosition(b), MeteoraDammV2CreatePosition(i)) => merge_generic(b, i),
         (MeteoraDammV2ClosePosition(b), MeteoraDammV2ClosePosition(i)) => merge_generic(b, i),
 
+        // ========== Meteora DLMM 系列 ==========
+        (MeteoraDlmmSwap(b), MeteoraDlmmSwap(i)) => merge_generic(b, i),
+        (MeteoraDlmmAddLiquidity(b), MeteoraDlmmAddLiquidity(i)) => merge_generic(b, i),
+        (MeteoraDlmmRemoveLiquidity(b), MeteoraDlmmRemoveLiquidity(i)) => merge_generic(b, i),
+        (MeteoraDlmmInitializePool(b), MeteoraDlmmInitializePool(i)) => merge_generic(b, i),
+        (MeteoraDlmmInitializeBinArray(b), MeteoraDlmmInitializeBinArray(i)) => merge_generic(b, i),
+        (MeteoraDlmmCreatePosition(b), MeteoraDlmmCreatePosition(i)) => merge_generic(b, i),
+        (MeteoraDlmmClosePosition(b), MeteoraDlmmClosePosition(i)) => merge_generic(b, i),
+        (MeteoraDlmmClaimFee(b), MeteoraDlmmClaimFee(i)) => merge_generic(b, i),
+
         // ========== Bonk 系列 ==========
         (BonkTrade(b), BonkTrade(i)) => merge_generic(b, i),
+        (BonkPoolCreate(b), BonkPoolCreate(i)) => merge_generic(b, i),
+        (BonkMigrateAmm(b), BonkMigrateAmm(i)) => merge_generic(b, i),
 
         // 其他组合不需要合并（类型不匹配）
         _ => {}

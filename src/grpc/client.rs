@@ -72,7 +72,7 @@ impl YellowstoneGrpc {
         account_filters: Vec<AccountFilter>,
         event_type_filter: Option<EventTypeFilter>,
     ) -> Result<Arc<ArrayQueue<DexEvent>>, Box<dyn std::error::Error>> {
-        let queue = Arc::new(ArrayQueue::new(100_000));
+        let queue = Arc::new(ArrayQueue::new(self.config.buffer_size.max(1)));
         let queue_clone = Arc::clone(&queue);
         let self_clone = self.clone();
 
@@ -363,7 +363,12 @@ impl YellowstoneGrpc {
 
         match mode {
             OrderMode::Unordered => {
-                for e in parse_transaction_core(&tx, grpc_us, Some(block_us), filter.as_ref()) {
+                for e in crate::grpc::parse_subscribe_update_transaction_low_latency(
+                    &tx,
+                    grpc_us,
+                    Some(block_us),
+                    filter.as_ref(),
+                ) {
                     let _ = queue.push(e);
                 }
             }
@@ -476,23 +481,19 @@ fn parse_transaction_core(
     let slot = tx.slot;
     let idx = info.index;
 
-    // 并行解析 logs 和 instructions
-    let (log_events, instr_events) = rayon::join(
-        || {
-            parse_logs(
-                meta,
-                &info.transaction,
-                &meta.log_messages,
-                sig,
-                slot,
-                idx,
-                block_us,
-                grpc_us,
-                filter,
-            )
-        },
-        || parse_instructions(meta, &info.transaction, sig, slot, idx, block_us, grpc_us, filter),
+    let log_events = parse_logs(
+        meta,
+        &info.transaction,
+        &meta.log_messages,
+        sig,
+        slot,
+        idx,
+        block_us,
+        grpc_us,
+        filter,
     );
+    let instr_events =
+        parse_instructions(meta, &info.transaction, sig, slot, idx, block_us, grpc_us, filter);
 
     crate::grpc::log_instr_dedup::dedupe_log_instruction_events(log_events, instr_events)
 }

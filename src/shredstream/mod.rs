@@ -5,7 +5,6 @@
 //!
 //! 实现拆分：`client` 负责网络与队列；`pump_ix` 为 **DEX 外层**指令热路径：
 //! Pump.fun 使用专用解析，其它已支持池子协议复用 `instr::parse_instruction_unified`；
-//! `pfees_ix` 为 **Pump Fees（`pfee...`）** 外层指令热路径，**仅** `update_fee_shares` 会解析并入队。
 //!
 //! ## 使用示例
 //! ```rust,no_run
@@ -34,13 +33,13 @@
 //! - 仅 `static_account_keys()`：V0 交易若带 **地址查找表（ALT）**，超出静态表的账户索引无法解析，对应腿可能解析失败；无 ALT 时静态表即全表。
 //! - 不解析 **inner instructions**：只覆盖外层指令可解析的事件；若事件只存在于 CPI/Program log，需使用 gRPC/RPC 路径。
 //! - 无 block_time，恒为 0
-//! - tx_index 是 entry 内索引而非 slot 内索引
+//! - tx_index 在单个 ShredStream payload 内递增，不保证等同于完整 slot 全局交易索引
 
 pub mod client;
 pub mod config;
-pub(crate) mod pfees_ix;
 pub mod proto;
 pub(crate) mod pump_ix;
 
 pub use client::ShredStreamClient;
 pub use config::ShredStreamConfig;
+pub use pump_ix::{parse_transaction_dex_events, parse_transaction_dex_events_with_filter};
