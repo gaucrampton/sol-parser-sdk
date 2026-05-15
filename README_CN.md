@@ -108,13 +108,13 @@ sol-parser-sdk = { path = "../sol-parser-sdk", default-features = false, feature
 
 ```toml
 # 在 Cargo.toml 中添加
-sol-parser-sdk = "0.4.7"
+sol-parser-sdk = "0.4.9"
 ```
 
 或使用零拷贝解析器（最高性能）：
 
 ```toml
-sol-parser-sdk = { version = "0.4.7", default-features = false, features = ["parse-zero-copy"] }
+sol-parser-sdk = { version = "0.4.9", default-features = false, features = ["parse-zero-copy"] }
 ```
 
 ### 性能测试
@@ -176,7 +176,10 @@ cargo run --example pumpswap_ordered --release
 ### 基本用法
 
 ```rust
-use sol_parser_sdk::grpc::{YellowstoneGrpc, ClientConfig, OrderMode, EventTypeFilter, EventType};
+use sol_parser_sdk::grpc::{
+    AccountFilter, ClientConfig, EventType, EventTypeFilter, OrderMode, Protocol,
+    TransactionFilter, YellowstoneGrpc,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -198,9 +201,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config,
     )?;
 
-    // 仅过滤 PumpFun Trade 事件（超快路径）
+    let protocols = vec![Protocol::PumpFun, Protocol::PumpSwap, Protocol::RaydiumCpmm];
+    let transaction_filter = TransactionFilter::for_protocols(&protocols);
+    let account_filter = AccountFilter::for_protocols(&protocols);
+
+    // 在解析前过滤事件，走最低延迟路径
     let event_filter = EventTypeFilter::include_only(vec![
-        EventType::PumpFunTrade
+        EventType::PumpFunBuy,
+        EventType::PumpFunSell,
+        EventType::PumpSwapBuy,
+        EventType::PumpSwapSell,
+        EventType::RaydiumCpmmSwap,
     ]);
 
     // 订阅并获取无锁队列
@@ -240,6 +251,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ShredStream 通过直接订阅 Jito 的 ShredStream 服务提供超低延迟（比 gRPC 快约 50-100ms）：
 
 ```rust
+use sol_parser_sdk::grpc::{EventType, EventTypeFilter};
 use sol_parser_sdk::shredstream::{ShredStreamClient, ShredStreamConfig};
 use sol_parser_sdk::DexEvent;
 use std::sync::Arc;
@@ -259,8 +271,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let client = ShredStreamClient::new_with_config("http://127.0.0.1:10800", config).await?;
 
-    // 订阅并获取无锁队列
-    let queue = client.subscribe().await?;
+    // 使用 SDK 侧过滤，在事件转换前丢弃无关事件。
+    // 如果要接收所有支持事件，可使用 `client.subscribe().await?`。
+    let event_filter = EventTypeFilter::include_only(vec![
+        EventType::PumpFunBuy,
+        EventType::PumpSwapBuy,
+        EventType::RaydiumCpmmSwap,
+    ]);
+    let queue = client.subscribe_with_filter(Some(event_filter)).await?;
 
     // 消费事件
     loop {
@@ -293,15 +311,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### DEX 协议
 - ✅ **PumpFun** - Meme 币交易（超快零拷贝路径，含 v2 指令）
+- ✅ **Pump Fees** - Pump 费用分成配置事件
 - ✅ **PumpSwap** - PumpFun 交换协议
+- ✅ **Raydium Launchpad / Bonk** - 代币发射平台
 - ✅ **Raydium AMM V4** - 自动做市商
 - ✅ **Raydium CLMM** - 集中流动性做市
 - ✅ **Raydium CPMM** - 集中池做市
 - ✅ **Orca Whirlpool** - 集中流动性 AMM
-- ✅ **Meteora AMM** - 动态 AMM
-- ✅ **Meteora DAMM** - 动态 AMM V2
+- ✅ **Meteora Pools** - 动态 AMM
+- ✅ **Meteora DAMM v2** - 动态 AMM V2
 - ✅ **Meteora DLMM** - 动态流动性做市
-- ✅ **Bonk Launchpad** - 代币发射平台
 
 ### 事件类型
 每个协议支持：
@@ -371,10 +390,19 @@ if let Some(event) = queue.pop() {
 ### 示例：交易机器人
 ```rust
 let event_filter = EventTypeFilter::include_only(vec![
-    EventType::PumpFunTrade,
+    EventType::PumpFunBuy,
+    EventType::PumpFunSell,
+    EventType::PumpFunBuyExactSolIn,
+    EventType::PumpSwapBuy,
+    EventType::PumpSwapSell,
+    EventType::BonkTrade,
+    EventType::RaydiumCpmmSwap,
     EventType::RaydiumAmmV4Swap,
     EventType::RaydiumClmmSwap,
     EventType::OrcaWhirlpoolSwap,
+    EventType::MeteoraPoolsSwap,
+    EventType::MeteoraDammV2Swap,
+    EventType::MeteoraDlmmSwap,
 ]);
 ```
 
@@ -382,8 +410,14 @@ let event_filter = EventTypeFilter::include_only(vec![
 ```rust
 let event_filter = EventTypeFilter::include_only(vec![
     EventType::PumpFunCreate,
+    EventType::PumpFeesUpdateFeeShares,
+    EventType::PumpSwapCreatePool,
+    EventType::RaydiumCpmmInitialize,
     EventType::RaydiumClmmCreatePool,
-    EventType::OrcaWhirlpoolInitialize,
+    EventType::OrcaWhirlpoolPoolInitialized,
+    EventType::MeteoraPoolsPoolCreated,
+    EventType::MeteoraDammV2CreatePosition,
+    EventType::MeteoraDlmmInitializePool,
 ]);
 ```
 

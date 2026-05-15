@@ -108,13 +108,13 @@ sol-parser-sdk = { path = "../sol-parser-sdk", default-features = false, feature
 
 ```toml
 # Add to your Cargo.toml
-sol-parser-sdk = "0.4.7"
+sol-parser-sdk = "0.4.9"
 ```
 
 Or with the zero-copy parser (maximum performance):
 
 ```toml
-sol-parser-sdk = { version = "0.4.7", default-features = false, features = ["parse-zero-copy"] }
+sol-parser-sdk = { version = "0.4.9", default-features = false, features = ["parse-zero-copy"] }
 ```
 
 ### Performance Testing
@@ -175,7 +175,10 @@ cargo run --example pumpswap_ordered --release
 ### Basic Usage
 
 ```rust
-use sol_parser_sdk::grpc::{YellowstoneGrpc, ClientConfig, OrderMode, EventTypeFilter, EventType};
+use sol_parser_sdk::grpc::{
+    AccountFilter, ClientConfig, EventType, EventTypeFilter, OrderMode, Protocol,
+    TransactionFilter, YellowstoneGrpc,
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -197,9 +200,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         config,
     )?;
 
-    // Filter for PumpFun Trade events only (ultra-fast path)
+    let protocols = vec![Protocol::PumpFun, Protocol::PumpSwap, Protocol::RaydiumCpmm];
+    let transaction_filter = TransactionFilter::for_protocols(&protocols);
+    let account_filter = AccountFilter::for_protocols(&protocols);
+
+    // Filter before parsing for the lowest-latency path.
     let event_filter = EventTypeFilter::include_only(vec![
-        EventType::PumpFunTrade
+        EventType::PumpFunBuy,
+        EventType::PumpFunSell,
+        EventType::PumpSwapBuy,
+        EventType::PumpSwapSell,
+        EventType::RaydiumCpmmSwap,
     ]);
 
     // Subscribe and get lock-free queue
@@ -239,6 +250,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ShredStream provides ultra-low latency (~50-100ms faster than gRPC) by directly subscribing to Jito's ShredStream service:
 
 ```rust
+use sol_parser_sdk::grpc::{EventType, EventTypeFilter};
 use sol_parser_sdk::shredstream::{ShredStreamClient, ShredStreamConfig};
 use sol_parser_sdk::DexEvent;
 use std::sync::Arc;
@@ -258,8 +270,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let client = ShredStreamClient::new_with_config("http://127.0.0.1:10800", config).await?;
 
-    // Subscribe and get lock-free queue
-    let queue = client.subscribe().await?;
+    // Subscribe with SDK-side filtering before event conversion.
+    // Use `client.subscribe().await?` to receive every supported event.
+    let event_filter = EventTypeFilter::include_only(vec![
+        EventType::PumpFunBuy,
+        EventType::PumpSwapBuy,
+        EventType::RaydiumCpmmSwap,
+    ]);
+    let queue = client.subscribe_with_filter(Some(event_filter)).await?;
 
     // Consume events
     loop {
@@ -292,15 +310,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### DEX Protocols
 - ✅ **PumpFun** - Meme coin trading (ultra-fast zero-copy path, incl. v2 instructions)
+- ✅ **Pump Fees** - Pump fee-sharing configuration events
 - ✅ **PumpSwap** - PumpFun swap protocol
+- ✅ **Raydium Launchpad / Bonk** - Token launch platform
 - ✅ **Raydium AMM V4** - Automated Market Maker
 - ✅ **Raydium CLMM** - Concentrated Liquidity
 - ✅ **Raydium CPMM** - Concentrated Pool
 - ✅ **Orca Whirlpool** - Concentrated liquidity AMM
-- ✅ **Meteora AMM** - Dynamic AMM
-- ✅ **Meteora DAMM** - Dynamic AMM V2
+- ✅ **Meteora Pools** - Dynamic AMM
+- ✅ **Meteora DAMM v2** - Dynamic AMM V2
 - ✅ **Meteora DLMM** - Dynamic Liquidity Market Maker
-- ✅ **Bonk Launchpad** - Token launch platform
 
 ### Event Types
 Each protocol supports:
@@ -370,10 +389,19 @@ Reduce processing overhead by filtering specific events:
 ### Example: Trading Bot
 ```rust
 let event_filter = EventTypeFilter::include_only(vec![
-    EventType::PumpFunTrade,
+    EventType::PumpFunBuy,
+    EventType::PumpFunSell,
+    EventType::PumpFunBuyExactSolIn,
+    EventType::PumpSwapBuy,
+    EventType::PumpSwapSell,
+    EventType::BonkTrade,
+    EventType::RaydiumCpmmSwap,
     EventType::RaydiumAmmV4Swap,
     EventType::RaydiumClmmSwap,
     EventType::OrcaWhirlpoolSwap,
+    EventType::MeteoraPoolsSwap,
+    EventType::MeteoraDammV2Swap,
+    EventType::MeteoraDlmmSwap,
 ]);
 ```
 
@@ -381,8 +409,14 @@ let event_filter = EventTypeFilter::include_only(vec![
 ```rust
 let event_filter = EventTypeFilter::include_only(vec![
     EventType::PumpFunCreate,
+    EventType::PumpFeesUpdateFeeShares,
+    EventType::PumpSwapCreatePool,
+    EventType::RaydiumCpmmInitialize,
     EventType::RaydiumClmmCreatePool,
-    EventType::OrcaWhirlpoolInitialize,
+    EventType::OrcaWhirlpoolPoolInitialized,
+    EventType::MeteoraPoolsPoolCreated,
+    EventType::MeteoraDammV2CreatePosition,
+    EventType::MeteoraDlmmInitializePool,
 ]);
 ```
 
