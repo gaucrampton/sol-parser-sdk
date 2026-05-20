@@ -343,7 +343,7 @@ fn parse_trade_event_inner_zero_copy(
         match ix_name.as_str() {
             "buy" | "buy_v2" => Some(DexEvent::PumpFunBuy(trade_event)),
             "sell" | "sell_v2" => Some(DexEvent::PumpFunSell(trade_event)),
-            "buy_exact_sol_in" | "buy_exact_quote_in_v2" => {
+            "buy_exact_sol_in" | "buy_exact_quote_in" | "buy_exact_quote_in_v2" => {
                 Some(DexEvent::PumpFunBuyExactSolIn(trade_event))
             }
             _ => Some(DexEvent::PumpFunTrade(trade_event)),

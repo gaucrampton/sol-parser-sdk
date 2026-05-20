@@ -25,7 +25,7 @@ enum LogInstrDedupKey {
         mint: Pubkey,
         user: Pubkey,
         is_buy: bool,
-        /// 指令种类桶：`0=buy/未知`、`1=sell`、`2=buy_exact_sol_in`（日志侧 `ix_name` 常为空，归入 buy 桶以便与 ix 配对）。
+        /// 指令种类桶：`0=buy/未知`、`1=sell`、`2=buy_exact_sol_in/buy_exact_quote_in`（日志侧 `ix_name` 常为空，归入 buy 桶以便与 ix 配对）。
         ix_lane: u8,
         /// 同签、同 `(mint,user,is_buy,ix_lane)` 下第几条（log 路与 ix 路各自从 0 计数）。
         lane_occurrence: u16,
@@ -101,7 +101,7 @@ enum LogInstrDedupKey {
 fn pumpfun_ix_lane(ix_name: &str) -> u8 {
     match ix_name {
         "sell" | "sell_v2" => 1,
-        "buy_exact_sol_in" | "buy_exact_quote_in_v2" => 2,
+        "buy_exact_sol_in" | "buy_exact_quote_in" | "buy_exact_quote_in_v2" => 2,
         _ => 0,
     }
 }
@@ -254,6 +254,13 @@ mod tests {
             grpc_recv_us: 0,
             recent_blockhash: None,
         }
+    }
+
+    #[test]
+    fn pumpfun_exact_quote_short_name_uses_exact_buy_lane() {
+        assert_eq!(pumpfun_ix_lane("buy_exact_sol_in"), 2);
+        assert_eq!(pumpfun_ix_lane("buy_exact_quote_in"), 2);
+        assert_eq!(pumpfun_ix_lane("buy_exact_quote_in_v2"), 2);
     }
 
     #[test]

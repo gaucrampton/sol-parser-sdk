@@ -414,7 +414,7 @@ fn parse_create_event_optimized(
 /// 根据 ix_name 返回不同的事件类型:
 /// - "buy" -> DexEvent::PumpFunBuy
 /// - "sell" -> DexEvent::PumpFunSell
-/// - "buy_exact_sol_in" -> DexEvent::PumpFunBuyExactSolIn
+/// - "buy_exact_sol_in" / "buy_exact_quote_in" -> DexEvent::PumpFunBuyExactSolIn
 /// - 其他/空 -> DexEvent::PumpFunTrade (兼容旧版本)
 #[inline(always)]
 fn parse_trade_event_optimized(
@@ -504,7 +504,7 @@ fn parse_trade_event_optimized(
         offset += 8;
 
         // ix_name: String (4-byte length prefix + content)
-        // Values: "buy" | "sell" | "buy_exact_sol_in"
+        // Values: "buy" | "sell" | "buy_exact_sol_in" | "buy_exact_quote_in"
         let ix_name = if offset + 4 <= data.len() {
             if let Some((s, len)) = read_str_unchecked(data, offset) {
                 offset += len;
@@ -607,7 +607,7 @@ fn parse_trade_event_optimized(
         match ix_name.as_str() {
             "buy" | "buy_v2" => Some(DexEvent::PumpFunBuy(trade_event)),
             "sell" | "sell_v2" => Some(DexEvent::PumpFunSell(trade_event)),
-            "buy_exact_sol_in" | "buy_exact_quote_in_v2" => {
+            "buy_exact_sol_in" | "buy_exact_quote_in" | "buy_exact_quote_in_v2" => {
                 Some(DexEvent::PumpFunBuyExactSolIn(trade_event))
             }
             _ => Some(DexEvent::PumpFunTrade(trade_event)), // 兼容旧版本或未知类型
@@ -749,7 +749,7 @@ pub fn is_event_type(log: &str, discriminator: u64) -> bool {
 /// Returns different event types based on ix_name:
 /// - "buy" -> DexEvent::PumpFunBuy
 /// - "sell" -> DexEvent::PumpFunSell
-/// - "buy_exact_sol_in" -> DexEvent::PumpFunBuyExactSolIn
+/// - "buy_exact_sol_in" / "buy_exact_quote_in" -> DexEvent::PumpFunBuyExactSolIn
 /// - other/empty -> DexEvent::PumpFunTrade (backward compatible)
 #[inline(always)]
 pub fn parse_trade_from_data(
@@ -927,7 +927,7 @@ pub fn parse_trade_from_data(
         match ix_name.as_str() {
             "buy" | "buy_v2" => Some(DexEvent::PumpFunBuy(trade_event)),
             "sell" | "sell_v2" => Some(DexEvent::PumpFunSell(trade_event)),
-            "buy_exact_sol_in" | "buy_exact_quote_in_v2" => {
+            "buy_exact_sol_in" | "buy_exact_quote_in" | "buy_exact_quote_in_v2" => {
                 Some(DexEvent::PumpFunBuyExactSolIn(trade_event))
             }
             _ => Some(DexEvent::PumpFunTrade(trade_event)),

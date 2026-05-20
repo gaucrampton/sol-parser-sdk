@@ -116,7 +116,7 @@ pub struct PumpFunTradeEvent {
     pub total_claimed_tokens: u64,
     pub current_sol_volume: u64,
     pub last_update_timestamp: i64,
-    /// Instruction name: `"buy"` \| `"sell"` \| `"buy_exact_sol_in"` \| `"buy_v2"` \| `"sell_v2"` \| `"buy_exact_quote_in_v2"`
+    /// Instruction name: `"buy"` \| `"sell"` \| `"buy_exact_sol_in"` \| `"buy_exact_quote_in"` \| `"buy_v2"` \| `"sell_v2"` \| `"buy_exact_quote_in_v2"`
     pub ix_name: String,
     /// 与链上 / Explorer `tradeEvent` 中 `mayhemMode` 一致（gRPC 日志解析填充；勿用 fee 地址推断）。
     pub mayhem_mode: bool,

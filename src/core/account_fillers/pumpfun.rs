@@ -6,6 +6,17 @@ use solana_sdk::pubkey::Pubkey;
 /// 账户获取辅助函数类型
 pub type AccountGetter<'a> = dyn Fn(usize) -> Pubkey + 'a;
 
+#[inline(always)]
+fn account_at_matches_mint(e: &PumpFunTradeEvent, get: &AccountGetter<'_>, idx: usize) -> bool {
+    e.mint != Pubkey::default() && get(idx) == e.mint
+}
+
+#[inline(always)]
+fn pump_trade_uses_v2_layout(e: &PumpFunTradeEvent, get: &AccountGetter<'_>) -> bool {
+    matches!(e.ix_name.as_str(), "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2")
+        || (e.ix_name == "buy_exact_quote_in" && account_at_matches_mint(e, get, 1))
+}
+
 /// 填充 PumpFun Trade 事件账户
 ///
 /// PumpFun Buy/Sell instruction account mapping (from pumpfun.json IDL):
@@ -16,8 +27,13 @@ pub type AccountGetter<'a> = dyn Fn(usize) -> Pubkey + 'a;
 /// 16 bonding_curve_v2, 17 buyback_fee_recipient。
 /// Sell 共 14 个 IDL 账户；升级后非 cashback: 14 bonding_curve_v2, 15 buyback_fee_recipient；
 /// cashback: 14 user_volume_accumulator, 15 bonding_curve_v2, 16 buyback_fee_recipient。
+///
+/// Pump v2 (`buy_v2` / `buy_exact_quote_in_v2` / `sell_v2`) 使用不同账户布局：
+/// mint=#1, token_program=#3, fee_recipient=#6, bonding_curve=#10, user=#13, creator_vault=#16。
+/// 部分日志/合并路径会把 `buy_exact_quote_in_v2` 暴露成短名 `buy_exact_quote_in`，因此需要用
+/// 实际账户形状确认 v2，避免把 Token-2022 mint 当 legacy SPL Token 处理。
 pub fn fill_trade_accounts(e: &mut PumpFunTradeEvent, get: &AccountGetter<'_>) {
-    let is_v2 = matches!(e.ix_name.as_str(), "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2");
+    let is_v2 = pump_trade_uses_v2_layout(e, get);
     let is_sell = matches!(e.ix_name.as_str(), "sell" | "sell_v2") || !e.is_buy;
 
     let fill_pk = |to: &mut Pubkey, idx: usize| {
@@ -276,5 +292,75 @@ mod tests {
         let mut e = PumpFunTradeEvent { fee_recipient: Pubkey::default(), ..Default::default() };
         fill_trade_accounts(&mut e, &get);
         assert_eq!(e.fee_recipient, fee);
+    }
+
+    #[test]
+    fn fill_trade_accounts_uses_v2_indices_for_short_buy_exact_quote_in() {
+        let mint = Pubkey::new_from_array([1u8; 32]);
+        let quote_mint = Pubkey::new_from_array([2u8; 32]);
+        let token_program = Pubkey::new_from_array([3u8; 32]);
+        let fee_recipient = Pubkey::new_from_array([6u8; 32]);
+        let bonding_curve = Pubkey::new_from_array([10u8; 32]);
+        let associated_bonding_curve = Pubkey::new_from_array([11u8; 32]);
+        let user = Pubkey::new_from_array([13u8; 32]);
+        let creator_vault = Pubkey::new_from_array([16u8; 32]);
+        let legacy_wrong_creator_vault = Pubkey::new_from_array([9u8; 32]);
+        let get = |i: usize| -> Pubkey {
+            match i {
+                1 => mint,
+                2 => quote_mint,
+                3 => token_program,
+                6 => fee_recipient,
+                9 => legacy_wrong_creator_vault,
+                10 => bonding_curve,
+                11 => associated_bonding_curve,
+                13 => user,
+                16 => creator_vault,
+                _ => Pubkey::default(),
+            }
+        };
+        let mut e = PumpFunTradeEvent {
+            mint,
+            is_buy: true,
+            ix_name: "buy_exact_quote_in".to_string(),
+            ..Default::default()
+        };
+
+        fill_trade_accounts(&mut e, &get);
+
+        assert_eq!(e.quote_mint, quote_mint);
+        assert_eq!(e.token_program, token_program);
+        assert_eq!(e.fee_recipient, fee_recipient);
+        assert_eq!(e.bonding_curve, bonding_curve);
+        assert_eq!(e.associated_bonding_curve, associated_bonding_curve);
+        assert_eq!(e.user, user);
+        assert_eq!(e.creator_vault, creator_vault);
+        assert_ne!(e.creator_vault, legacy_wrong_creator_vault);
+    }
+
+    #[test]
+    fn fill_trade_accounts_keeps_legacy_layout_for_legacy_shaped_short_buy_exact_quote_in() {
+        let mint = Pubkey::new_from_array([2u8; 32]);
+        let token_program = Pubkey::new_from_array([8u8; 32]);
+        let creator_vault = Pubkey::new_from_array([9u8; 32]);
+        let get = |i: usize| -> Pubkey {
+            match i {
+                2 => mint,
+                8 => token_program,
+                9 => creator_vault,
+                _ => Pubkey::default(),
+            }
+        };
+        let mut e = PumpFunTradeEvent {
+            mint,
+            is_buy: true,
+            ix_name: "buy_exact_quote_in".to_string(),
+            ..Default::default()
+        };
+
+        fill_trade_accounts(&mut e, &get);
+
+        assert_eq!(e.token_program, token_program);
+        assert_eq!(e.creator_vault, creator_vault);
     }
 }
