@@ -14,6 +14,7 @@ pub(crate) const TRANSFER_FEE_SHARING_IX: [u8; 8] = [202, 10, 75, 200, 164, 34, 
 pub(crate) const UPDATE_ADMIN_IX: [u8; 8] = [161, 176, 40, 213, 60, 184, 179, 228];
 pub(crate) const UPDATE_FEE_CONFIG_IX: [u8; 8] = [104, 184, 103, 242, 88, 151, 107, 20];
 pub(crate) const UPDATE_FEE_SHARES_IX: [u8; 8] = [189, 13, 136, 99, 187, 164, 237, 35];
+pub(crate) const UPDATE_FEE_SHARES_V2_IX: [u8; 8] = [111, 251, 49, 6, 78, 78, 106, 18];
 pub(crate) const UPSERT_FEE_TIERS_IX: [u8; 8] = [227, 23, 150, 12, 77, 86, 94, 4];
 
 #[inline(always)]
@@ -73,7 +74,7 @@ pub fn parse_instruction(
         ));
     }
 
-    if disc == UPDATE_FEE_SHARES_IX {
+    if disc == UPDATE_FEE_SHARES_IX || disc == UPDATE_FEE_SHARES_V2_IX {
         if accounts.len() < 8 || instruction_data.len() < 8 {
             return None;
         }
@@ -216,4 +217,78 @@ pub fn parse_instruction(
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pk(byte: u8) -> Pubkey {
+        Pubkey::new_from_array([byte; 32])
+    }
+
+    fn accounts() -> Vec<Pubkey> {
+        vec![
+            pk(1),  // event_authority
+            pk(2),  // program
+            pk(3),  // authority
+            pk(4),  // global
+            pk(5),  // mint
+            pk(6),  // sharing_config
+            pk(7),  // bonding_curve
+            pk(8),  // pump_creator_vault
+            pk(9),  // pump_creator_vault_ata (v2) / system_program (v1)
+            pk(10), // system_program (v2) / pump_program (v1)
+        ]
+    }
+
+    fn update_fee_shares_data(disc: [u8; 8]) -> Vec<u8> {
+        let mut data = disc.to_vec();
+        data.extend_from_slice(&1u32.to_le_bytes());
+        data.extend_from_slice(&pk(42).to_bytes());
+        data.extend_from_slice(&2500u16.to_le_bytes());
+        data
+    }
+
+    fn parse_update_fee_shares(disc: [u8; 8]) -> PumpFeesUpdateFeeSharesEvent {
+        let event = parse_instruction(
+            &update_fee_shares_data(disc),
+            &accounts(),
+            Signature::default(),
+            1,
+            0,
+            None,
+            99,
+        )
+        .expect("update_fee_shares event");
+
+        match event {
+            DexEvent::PumpFeesUpdateFeeShares(e) => e,
+            other => panic!("expected PumpFeesUpdateFeeShares, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parses_update_fee_shares_v1_ix_vault() {
+        let event = parse_update_fee_shares(UPDATE_FEE_SHARES_IX);
+        assert_eq!(event.mint, pk(5));
+        assert_eq!(event.sharing_config, pk(6));
+        assert_eq!(event.admin, pk(3));
+        assert_eq!(event.bonding_curve, pk(7));
+        assert_eq!(event.pump_creator_vault, pk(8));
+        assert_eq!(event.new_shareholders[0].address, pk(42));
+        assert_eq!(event.new_shareholders[0].share_bps, 2500);
+    }
+
+    #[test]
+    fn parses_update_fee_shares_v2_ix_vault() {
+        let event = parse_update_fee_shares(UPDATE_FEE_SHARES_V2_IX);
+        assert_eq!(event.mint, pk(5));
+        assert_eq!(event.sharing_config, pk(6));
+        assert_eq!(event.admin, pk(3));
+        assert_eq!(event.bonding_curve, pk(7));
+        assert_eq!(event.pump_creator_vault, pk(8));
+        assert_eq!(event.new_shareholders[0].address, pk(42));
+        assert_eq!(event.new_shareholders[0].share_bps, 2500);
+    }
 }

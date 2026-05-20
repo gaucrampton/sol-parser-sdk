@@ -344,8 +344,8 @@ pub struct PumpFeesUpdateFeeConfigEvent {
 
 /// IDL `UpdateFeeSharesEvent`
 ///
-/// 链上 **`update_fee_shares` 指令**还会在账户列表中带上 `bonding_curve`、`pump_creator_vault`
-/// （Explorer #7/#8，`Program data` 日志体不含这两字段 ⇒ 仍为 `default`）。
+/// 链上 **`update_fee_shares` / `update_fee_shares_v2` 指令**还会在账户列表中带上
+/// `bonding_curve`、`pump_creator_vault`（Explorer #7/#8，`Program data` 日志体不含这两字段 ⇒ 仍为 `default`）。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PumpFeesUpdateFeeSharesEvent {
     pub metadata: EventMetadata,
