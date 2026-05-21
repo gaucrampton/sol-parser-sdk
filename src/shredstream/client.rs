@@ -227,10 +227,9 @@ impl ShredStreamClient {
         let signature = transaction.signatures[0];
         if let VersionedMessage::V0(m) = &transaction.message {
             if !m.address_table_lookups.is_empty() {
-                log::debug!(
+                log::trace!(
                     target: "sol_parser_sdk::shredstream",
-                    "V0 tx uses address lookup tables; only static keys are available — \
-                     some instruction account indices may resolve to wrong pubkeys (often only 1 BUY gets is_created_buy)"
+                    "V0 tx uses address lookup tables; shred parser will parse only instructions whose accounts are fully static"
                 );
             }
         }

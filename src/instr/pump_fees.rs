@@ -9,6 +9,7 @@ use crate::logs::pump_fees::{read_fee_tiers_vec, read_fees_at, read_shareholders
 pub(crate) const CREATE_FEE_SHARING_IX: [u8; 8] = [195, 78, 86, 76, 111, 52, 251, 213];
 pub(crate) const INITIALIZE_FEE_CONFIG_IX: [u8; 8] = [62, 162, 20, 133, 121, 65, 145, 27];
 pub(crate) const RESET_FEE_SHARING_IX: [u8; 8] = [10, 2, 182, 95, 16, 127, 129, 186];
+pub(crate) const RESET_FEE_SHARING_V2_IX: [u8; 8] = [169, 245, 17, 209, 94, 91, 248, 128];
 pub(crate) const REVOKE_FEE_SHARING_IX: [u8; 8] = [18, 233, 158, 39, 185, 207, 58, 104];
 pub(crate) const TRANSFER_FEE_SHARING_IX: [u8; 8] = [202, 10, 75, 200, 164, 34, 210, 96];
 pub(crate) const UPDATE_ADMIN_IX: [u8; 8] = [161, 176, 40, 213, 60, 184, 179, 228];
@@ -111,11 +112,11 @@ pub fn parse_instruction(
         }));
     }
 
-    if disc == RESET_FEE_SHARING_IX {
-        let old_admin = *accounts.get(0)?;
-        let new_admin = *accounts.get(2)?;
-        let mint = *accounts.get(3)?;
-        let sharing_config = *accounts.get(4)?;
+    if disc == RESET_FEE_SHARING_IX || disc == RESET_FEE_SHARING_V2_IX {
+        let new_admin = *accounts.first()?;
+        let old_admin = *accounts.get(3)?;
+        let mint = *accounts.get(5)?;
+        let sharing_config = *accounts.get(6)?;
         return Some(DexEvent::PumpFeesResetFeeSharingConfig(PumpFeesResetFeeSharingConfigEvent {
             metadata: md,
             timestamp: 0,
@@ -242,6 +243,21 @@ mod tests {
         ]
     }
 
+    fn reset_accounts() -> Vec<Pubkey> {
+        vec![
+            pk(10), // new_admin
+            pk(11), // event_authority
+            pk(12), // program
+            pk(13), // authority / old admin
+            pk(14), // global
+            pk(15), // mint
+            pk(16), // sharing_config
+            pk(17), // bonding_curve
+            pk(18), // pump_creator_vault
+            pk(19), // v1 system_program / v2 pump_creator_vault_ata
+        ]
+    }
+
     fn update_fee_shares_data(disc: [u8; 8]) -> Vec<u8> {
         let mut data = disc.to_vec();
         data.extend_from_slice(&1u32.to_le_bytes());
@@ -290,5 +306,24 @@ mod tests {
         assert_eq!(event.pump_creator_vault, pk(8));
         assert_eq!(event.new_shareholders[0].address, pk(42));
         assert_eq!(event.new_shareholders[0].share_bps, 2500);
+    }
+
+    #[test]
+    fn parses_reset_fee_sharing_accounts_from_idl_order() {
+        for disc in [RESET_FEE_SHARING_IX, RESET_FEE_SHARING_V2_IX] {
+            let event =
+                parse_instruction(&disc, &reset_accounts(), Signature::default(), 1, 0, None, 99)
+                    .expect("reset fee sharing event");
+
+            match event {
+                DexEvent::PumpFeesResetFeeSharingConfig(e) => {
+                    assert_eq!(e.new_admin, pk(10));
+                    assert_eq!(e.old_admin, pk(13));
+                    assert_eq!(e.mint, pk(15));
+                    assert_eq!(e.sharing_config, pk(16));
+                }
+                other => panic!("expected PumpFeesResetFeeSharingConfig, got {other:?}"),
+            }
+        }
     }
 }

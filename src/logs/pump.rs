@@ -205,13 +205,14 @@ pub fn extract_discriminator_simd(log: &str) -> Option<u64> {
     let data_part = &log[pos + PROGRAM_DATA_TAG_LEN..];
     let trimmed = data_part.trim();
 
-    if trimmed.len() < 12 {
+    if trimmed.len() < 16 {
         return None;
     }
 
     use base64_simd::AsOut;
     let mut buf = [0u8; 12];
-    base64_simd::STANDARD.decode(&trimmed.as_bytes()[..16], buf.as_mut().as_out()).ok()?;
+    let prefix = trimmed.as_bytes().get(..16)?;
+    base64_simd::STANDARD.decode(prefix, buf.as_mut().as_out()).ok()?;
 
     unsafe {
         let ptr = buf.as_ptr() as *const u64;

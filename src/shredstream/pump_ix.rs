@@ -54,6 +54,9 @@ fn scan_create_mint_from_ix(
     created_mints: &mut PumpMintSet,
     mayhem_mints: &mut PumpMintSet,
 ) {
+    if instruction_references_loaded_key(program_id_index, ix_accounts, static_keys.len()) {
+        return;
+    }
     let Some(program_id) = static_keys.get(program_id_index as usize) else {
         return;
     };
@@ -79,6 +82,16 @@ fn scan_create_mint_from_ix(
             push_unique_mint(mayhem_mints, mint);
         }
     }
+}
+
+#[inline(always)]
+fn instruction_references_loaded_key(
+    program_id_index: u8,
+    ix_accounts: &[u8],
+    static_key_len: usize,
+) -> bool {
+    program_id_index as usize >= static_key_len
+        || ix_accounts.iter().any(|&idx| idx as usize >= static_key_len)
 }
 
 /// 第一遍：收集本笔交易内 Pump Create/CreateV2 的 mint（**零指令副本**，直接引用 message 内 `CompiledInstruction`）。
@@ -134,6 +147,13 @@ fn dispatch_shred_outer(
     mayhem_mints: &PumpMintSet,
     events: &mut Vec<DexEvent>,
 ) {
+    if instruction_references_loaded_key(program_id_index, ix_accounts, static_keys.len()) {
+        log::trace!(
+            target: "sol_parser_sdk::shredstream",
+            "skip shred outer ix because it references ALT-loaded accounts; wait for gRPC meta"
+        );
+        return;
+    }
     let Some(program_id) = static_keys.get(program_id_index as usize) else {
         return;
     };
