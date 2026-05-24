@@ -108,13 +108,13 @@ sol-parser-sdk = { path = "../sol-parser-sdk", default-features = false, feature
 
 ```toml
 # Add to your Cargo.toml
-sol-parser-sdk = "0.4.15"
+sol-parser-sdk = "0.4.16"
 ```
 
 Or with the zero-copy parser (maximum performance):
 
 ```toml
-sol-parser-sdk = { version = "0.4.15", default-features = false, features = ["parse-zero-copy"] }
+sol-parser-sdk = { version = "0.4.16", default-features = false, features = ["parse-zero-copy"] }
 ```
 
 ### Performance Testing
@@ -448,11 +448,13 @@ The SDK recognizes Pump.fun's new v2 trading instructions introduced in the Bond
 
 | ix_name in TradeEvent | DexEvent Variant |
 |----------------------|-----------------|
-| `"buy"` / `"buy_v2"` | `DexEvent::PumpFunBuy` |
+| `"buy"` / `"buy_v2"` / `"buy_exact_quote_in"` / `"buy_exact_quote_in_v2"` | `DexEvent::PumpFunBuy` |
 | `"sell"` / `"sell_v2"` | `DexEvent::PumpFunSell` |
-| `"buy_exact_sol_in"` / `"buy_exact_quote_in_v2"` | `DexEvent::PumpFunBuyExactSolIn` |
+| `"buy_exact_sol_in"` | `DexEvent::PumpFunBuyExactSolIn` |
 
 No changes are required in your event handling code — v2 events arrive through the same `PumpFunTradeEvent` struct with the correct `ix_name` field populated. Instruction discriminators for `buy_v2` (`[184, 23, 238, 97, 103, 197, 211, 61]`), `sell_v2` (`[93, 246, 130, 60, 231, 233, 64, 178]`), and `buy_exact_quote_in_v2` (`[194, 171, 28, 70, 104, 77, 91, 47]`) are recognized at the instruction parser level.
+
+`CreateEvent` also exposes `quote_mint` and `virtual_quote_reserves`, so USDC quote pools can be distinguished from native SOL pools and initialized with the correct quote-side reserve.
 
 ### Dynamic Subscription
 Update filters without reconnecting:

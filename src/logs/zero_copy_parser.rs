@@ -139,7 +139,7 @@ mod tests {
             DexEvent::PumpFunBuy(t) => {
                 assert_eq!(t.sol_amount, 1_000);
                 assert_eq!(t.token_amount, 2_000);
-                assert_eq!(t.ix_name, "buy_v2");
+                assert_eq!(t.ix_name, "buy");
                 assert_eq!(t.buyback_fee_basis_points, 150);
                 assert_eq!(t.buyback_fee, 160);
                 assert_eq!(t.shareholders.len(), 1);

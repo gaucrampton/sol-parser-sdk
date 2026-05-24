@@ -108,13 +108,13 @@ sol-parser-sdk = { path = "../sol-parser-sdk", default-features = false, feature
 
 ```toml
 # 在 Cargo.toml 中添加
-sol-parser-sdk = "0.4.15"
+sol-parser-sdk = "0.4.16"
 ```
 
 或使用零拷贝解析器（最高性能）：
 
 ```toml
-sol-parser-sdk = { version = "0.4.15", default-features = false, features = ["parse-zero-copy"] }
+sol-parser-sdk = { version = "0.4.16", default-features = false, features = ["parse-zero-copy"] }
 ```
 
 ### 性能测试
@@ -449,11 +449,13 @@ SDK 已支持 Pump.fun Bonding Curve 升级引入的新 v2 交易指令。来自
 
 | ix_name in TradeEvent | DexEvent 枚举变体 |
 |----------------------|-----------------|
-| `"buy"` / `"buy_v2"` | `DexEvent::PumpFunBuy` |
+| `"buy"` / `"buy_v2"` / `"buy_exact_quote_in"` / `"buy_exact_quote_in_v2"` | `DexEvent::PumpFunBuy` |
 | `"sell"` / `"sell_v2"` | `DexEvent::PumpFunSell` |
-| `"buy_exact_sol_in"` / `"buy_exact_quote_in_v2"` | `DexEvent::PumpFunBuyExactSolIn` |
+| `"buy_exact_sol_in"` | `DexEvent::PumpFunBuyExactSolIn` |
 
 无需修改现有事件处理代码 — v2 事件通过相同的 `PumpFunTradeEvent` 结构体投递，`ix_name` 字段会正确填充。指令层已识别 `buy_v2`（`[184, 23, 238, 97, 103, 197, 211, 61]`）、`sell_v2`（`[93, 246, 130, 60, 231, 233, 64, 178]`）和 `buy_exact_quote_in_v2`（`[194, 171, 28, 70, 104, 77, 91, 47]`）的 discriminator。
+
+`CreateEvent` 现在也会暴露 `quote_mint` 和 `virtual_quote_reserves`，USDC 报价池可以据此和 SOL 池区分，并使用正确的 quote 侧初始储备。
 
 ### 动态订阅
 无需重连即可更新过滤器：

@@ -14,7 +14,7 @@ fn account_at_matches_mint(e: &PumpFunTradeEvent, get: &AccountGetter<'_>, idx: 
 #[inline(always)]
 fn pump_trade_uses_v2_layout(e: &PumpFunTradeEvent, get: &AccountGetter<'_>) -> bool {
     matches!(e.ix_name.as_str(), "buy_v2" | "sell_v2" | "buy_exact_quote_in_v2")
-        || (e.ix_name == "buy_exact_quote_in" && account_at_matches_mint(e, get, 1))
+        || account_at_matches_mint(e, get, 1)
 }
 
 /// 填充 PumpFun Trade 事件账户
@@ -28,7 +28,7 @@ fn pump_trade_uses_v2_layout(e: &PumpFunTradeEvent, get: &AccountGetter<'_>) -> 
 /// Sell 共 14 个 IDL 账户；升级后非 cashback: 14 bonding_curve_v2, 15 buyback_fee_recipient；
 /// cashback: 14 user_volume_accumulator, 15 bonding_curve_v2, 16 buyback_fee_recipient。
 ///
-/// Pump v2 (`buy_v2` / `buy_exact_quote_in_v2` / `sell_v2`) 使用不同账户布局：
+/// Pump v2 (`buy` / `buy_exact_quote_in` / `sell` after ix_name normalization) 使用不同账户布局：
 /// mint=#1, token_program=#3, fee_recipient=#6, bonding_curve=#10, user=#13, creator_vault=#16。
 /// 部分日志/合并路径会把 `buy_exact_quote_in_v2` 暴露成短名 `buy_exact_quote_in`，因此需要用
 /// 实际账户形状确认 v2，避免把 Token-2022 mint 当 legacy SPL Token 处理。

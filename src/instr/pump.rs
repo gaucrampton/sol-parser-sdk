@@ -124,7 +124,7 @@ pub fn parse_instruction(
             tx_index,
             block_time_us,
             grpc_recv_us,
-            "buy_v2",
+            "buy",
             false,
         );
     }
@@ -137,7 +137,7 @@ pub fn parse_instruction(
             tx_index,
             block_time_us,
             grpc_recv_us,
-            "buy_exact_quote_in_v2",
+            "buy_exact_quote_in",
             true,
         );
     }
@@ -150,7 +150,7 @@ pub fn parse_instruction(
             tx_index,
             block_time_us,
             grpc_recv_us,
-            "sell_v2",
+            "sell",
         );
     }
 
@@ -518,11 +518,7 @@ fn parse_buy_v2_instruction(
         ..Default::default()
     };
 
-    if exact_quote_in {
-        Some(DexEvent::PumpFunBuyExactSolIn(trade_event))
-    } else {
-        Some(DexEvent::PumpFunBuy(trade_event))
-    }
+    Some(DexEvent::PumpFunBuy(trade_event))
 }
 
 fn parse_sell_v2_instruction(
@@ -916,7 +912,7 @@ mod tests {
                 assert_eq!(t.sharing_config, acc[18]);
                 assert_eq!(t.global_volume_accumulator, acc[19]);
                 assert_eq!(t.associated_user_volume_accumulator, acc[21]);
-                assert_eq!(t.ix_name, "buy_v2");
+                assert_eq!(t.ix_name, "buy");
             }
             other => panic!("expected PumpFunBuy, got {other:?}"),
         }
@@ -930,8 +926,8 @@ mod tests {
             parse_instruction(&data, &acc, Signature::default(), 1, 0, None, 99).expect("event");
 
         match event {
-            DexEvent::PumpFunBuyExactSolIn(t) => {
-                assert_eq!(t.ix_name, "buy_exact_quote_in_v2");
+            DexEvent::PumpFunBuy(t) => {
+                assert_eq!(t.ix_name, "buy_exact_quote_in");
                 assert_eq!(t.amount, 888);
                 assert_eq!(t.max_sol_cost, 0);
                 assert_eq!(t.quote_amount, 777);
@@ -939,7 +935,7 @@ mod tests {
                 assert_eq!(t.min_tokens_out, 888);
                 assert_eq!(t.quote_mint, acc[2]);
             }
-            other => panic!("expected PumpFunBuyExactSolIn, got {other:?}"),
+            other => panic!("expected PumpFunBuy, got {other:?}"),
         }
     }
 }

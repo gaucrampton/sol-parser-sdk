@@ -116,7 +116,7 @@ pub struct PumpFunTradeEvent {
     pub total_claimed_tokens: u64,
     pub current_sol_volume: u64,
     pub last_update_timestamp: i64,
-    /// Instruction name: `"buy"` \| `"sell"` \| `"buy_exact_sol_in"` \| `"buy_exact_quote_in"` \| `"buy_v2"` \| `"sell_v2"` \| `"buy_exact_quote_in_v2"`
+    /// Normalized instruction name: `"buy"` | `"sell"` | `"buy_exact_sol_in"` | `"buy_exact_quote_in"`
     pub ix_name: String,
     /// 与链上 / Explorer `tradeEvent` 中 `mayhemMode` 一致（gRPC 日志解析填充；勿用 fee 地址推断）。
     pub mayhem_mode: bool,
@@ -410,6 +410,11 @@ pub struct PumpFunCreateTokenEvent {
     pub is_mayhem_mode: bool,
     /// Cashback 是否开启 (IDL CreateEvent.is_cashback_enabled)
     pub is_cashback_enabled: bool,
+    /// Quote mint for v2 quote pools (for example USDC).
+    pub quote_mint: Pubkey,
+    /// Initial virtual quote reserves. For SOL pools this is the SOL-side reserve;
+    /// for USDC pools this is the USDC-side reserve.
+    pub virtual_quote_reserves: u64,
 }
 
 /// PumpFun Create V2 Token Event (SPL-22 / Mayhem Mode)
@@ -433,6 +438,10 @@ pub struct PumpFunCreateV2TokenEvent {
     pub token_program: Pubkey,
     pub is_mayhem_mode: bool,
     pub is_cashback_enabled: bool,
+    #[borsh(skip)]
+    pub quote_mint: Pubkey,
+    #[borsh(skip)]
+    pub virtual_quote_reserves: u64,
     #[borsh(skip)]
     pub mint_authority: Pubkey,
     #[borsh(skip)]

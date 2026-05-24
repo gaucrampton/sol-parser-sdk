@@ -211,6 +211,8 @@ pub fn parse_rpc_transaction(
         }
     }
 
+    crate::core::pumpfun_fee_enrich::enrich_pumpfun_same_tx_post_merge(&mut events);
+
     Ok(events)
 }
 

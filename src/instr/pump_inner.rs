@@ -279,6 +279,7 @@ fn parse_trade_event_inner_zero_copy(
             (String::new(), 0)
         };
         offset += ix_name_len;
+        let ix_name = crate::logs::pump::normalize_pumpfun_ix_name(&ix_name).to_string();
 
         // TradeEvent 新增字段 (PUMP_CASHBACK_README): mayhem_mode, cashback_fee_basis_points, cashback
         let mayhem_mode =
@@ -341,11 +342,10 @@ fn parse_trade_event_inner_zero_copy(
 
         // 根据 ix_name 返回不同的事件类型
         match ix_name.as_str() {
-            "buy" | "buy_v2" => Some(DexEvent::PumpFunBuy(trade_event)),
-            "sell" | "sell_v2" => Some(DexEvent::PumpFunSell(trade_event)),
-            "buy_exact_sol_in" | "buy_exact_quote_in" | "buy_exact_quote_in_v2" => {
-                Some(DexEvent::PumpFunBuyExactSolIn(trade_event))
-            }
+            "buy" => Some(DexEvent::PumpFunBuy(trade_event)),
+            "sell" => Some(DexEvent::PumpFunSell(trade_event)),
+            "buy_exact_sol_in" => Some(DexEvent::PumpFunBuyExactSolIn(trade_event)),
+            "buy_exact_quote_in" => Some(DexEvent::PumpFunBuy(trade_event)),
             _ => Some(DexEvent::PumpFunTrade(trade_event)),
         }
     }
@@ -362,7 +362,7 @@ fn parse_trade_event_inner_zero_copy(
 fn parse_create_event_inner(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     #[cfg(all(feature = "parse-borsh", not(feature = "parse-zero-copy")))]
     {
-        parse_create_event_inner_borsh(data, metadata)
+        parse_create_event_inner_compatible(data, metadata)
     }
 
     #[cfg(feature = "parse-zero-copy")]
@@ -371,16 +371,108 @@ fn parse_create_event_inner(data: &[u8], metadata: EventMetadata) -> Option<DexE
     }
 }
 
-/// Borsh 反序列化解析器 - Create 事件
+/// Compatible CreateEvent parser.
 ///
-/// **优点**: 类型安全、代码简洁、自动验证
+/// The IDL added `quote_mint` and `virtual_quote_reserves` to the tail of
+/// `CreateEvent`, so this parser accepts both old and new payload lengths.
 #[cfg(all(feature = "parse-borsh", not(feature = "parse-zero-copy")))]
 #[inline(always)]
-fn parse_create_event_inner_borsh(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    // CreateTokenEvent 包含多个 String 字段，不是固定大小
-    let mut event = borsh::from_slice::<PumpFunCreateTokenEvent>(data).ok()?;
-    event.metadata = metadata;
-    Some(DexEvent::PumpFunCreate(event))
+fn parse_create_event_inner_compatible(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    parse_create_event_fields(data, metadata)
+}
+
+#[inline(always)]
+fn read_u32_le(data: &[u8], offset: usize) -> Option<u32> {
+    let bytes = data.get(offset..offset + 4)?;
+    Some(u32::from_le_bytes(bytes.try_into().ok()?))
+}
+
+#[inline(always)]
+fn read_u64_le(data: &[u8], offset: usize) -> Option<u64> {
+    let bytes = data.get(offset..offset + 8)?;
+    Some(u64::from_le_bytes(bytes.try_into().ok()?))
+}
+
+#[inline(always)]
+fn read_i64_le(data: &[u8], offset: usize) -> Option<i64> {
+    let bytes = data.get(offset..offset + 8)?;
+    Some(i64::from_le_bytes(bytes.try_into().ok()?))
+}
+
+#[inline(always)]
+fn read_pubkey(data: &[u8], offset: usize) -> Option<solana_sdk::pubkey::Pubkey> {
+    let bytes = data.get(offset..offset + 32)?;
+    let mut out = [0u8; 32];
+    out.copy_from_slice(bytes);
+    Some(solana_sdk::pubkey::Pubkey::new_from_array(out))
+}
+
+#[inline(always)]
+fn read_string(data: &[u8], offset: &mut usize) -> Option<String> {
+    let len = read_u32_le(data, *offset)? as usize;
+    *offset = (*offset).checked_add(4)?;
+    let end = (*offset).checked_add(len)?;
+    let bytes = data.get(*offset..end)?;
+    *offset = end;
+    Some(std::str::from_utf8(bytes).ok()?.to_string())
+}
+
+fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    let mut offset = 0;
+
+    let name = read_string(data, &mut offset)?;
+    let symbol = read_string(data, &mut offset)?;
+    let uri = read_string(data, &mut offset)?;
+
+    let mint = read_pubkey(data, offset)?;
+    offset += 32;
+    let bonding_curve = read_pubkey(data, offset)?;
+    offset += 32;
+    let user = read_pubkey(data, offset)?;
+    offset += 32;
+    let creator = read_pubkey(data, offset)?;
+    offset += 32;
+    let timestamp = read_i64_le(data, offset)?;
+    offset += 8;
+    let virtual_token_reserves = read_u64_le(data, offset)?;
+    offset += 8;
+    let virtual_sol_reserves = read_u64_le(data, offset)?;
+    offset += 8;
+    let real_token_reserves = read_u64_le(data, offset)?;
+    offset += 8;
+    let token_total_supply = read_u64_le(data, offset)?;
+    offset += 8;
+
+    let token_program = read_pubkey(data, offset).unwrap_or_default();
+    offset += 32;
+    let is_mayhem_mode = data.get(offset).copied().unwrap_or_default() == 1;
+    offset += 1;
+    let is_cashback_enabled = data.get(offset).copied().unwrap_or_default() == 1;
+    offset += 1;
+    let quote_mint = read_pubkey(data, offset).unwrap_or_default();
+    offset += 32;
+    let virtual_quote_reserves = read_u64_le(data, offset).unwrap_or_default();
+
+    Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+        metadata,
+        name,
+        symbol,
+        uri,
+        mint,
+        bonding_curve,
+        user,
+        creator,
+        timestamp,
+        virtual_token_reserves,
+        virtual_sol_reserves,
+        real_token_reserves,
+        token_total_supply,
+        token_program,
+        is_mayhem_mode,
+        is_cashback_enabled,
+        quote_mint,
+        virtual_quote_reserves,
+    }))
 }
 
 /// 零拷贝解析器 - Create 事件
@@ -446,6 +538,15 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
         // IDL CreateEvent 最后一列: is_cashback_enabled
         let is_cashback_enabled =
             if offset < data.len() { read_bool_unchecked(data, offset) } else { false };
+        offset += 1;
+        let quote_mint = if offset + 32 <= data.len() {
+            read_pubkey_unchecked(data, offset)
+        } else {
+            solana_sdk::pubkey::Pubkey::default()
+        };
+        offset += 32;
+        let virtual_quote_reserves =
+            if offset + 8 <= data.len() { read_u64_unchecked(data, offset) } else { 0 };
 
         Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
             metadata,
@@ -464,6 +565,8 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
             token_program,
             is_mayhem_mode,
             is_cashback_enabled,
+            quote_mint,
+            virtual_quote_reserves,
         }))
     }
 }

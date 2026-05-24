@@ -236,6 +236,7 @@ pub(crate) fn dedupe_log_instruction_events(
             out.push(e);
         }
     }
+    crate::core::pumpfun_fee_enrich::enrich_pumpfun_same_tx_post_merge(&mut out);
     out
 }
 

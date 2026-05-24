@@ -42,7 +42,7 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         | (PumpFunBuyExactSolIn(b), PumpFunBuyExactSolIn(i)) => merge_pumpfun_trade(b, i),
 
         (PumpFunCreate(b), PumpFunCreate(i)) => merge_pumpfun_create(b, i),
-        (PumpFunCreateV2(b), PumpFunCreateV2(i)) => merge_generic(b, i),
+        (PumpFunCreateV2(b), PumpFunCreateV2(i)) => merge_pumpfun_create_v2(b, i),
         (PumpFunMigrate(b), PumpFunMigrate(i)) => merge_pumpfun_migrate(b, i),
         (PumpFunMigrateBondingCurveCreator(b), PumpFunMigrateBondingCurveCreator(i)) => {
             merge_generic(b, i)
@@ -327,6 +327,44 @@ fn merge_pumpfun_create(base: &mut PumpFunCreateTokenEvent, inner: PumpFunCreate
     base.token_total_supply = inner.token_total_supply;
     base.token_program = inner.token_program;
     base.is_mayhem_mode = inner.is_mayhem_mode;
+    base.is_cashback_enabled = inner.is_cashback_enabled;
+    put_pk_if_set(&mut base.quote_mint, inner.quote_mint);
+    put_u64_if_nonzero(&mut base.virtual_quote_reserves, inner.virtual_quote_reserves);
+}
+
+/// 合并 PumpFun CreateV2 事件
+#[inline(always)]
+fn merge_pumpfun_create_v2(base: &mut PumpFunCreateV2TokenEvent, inner: PumpFunCreateV2TokenEvent) {
+    fill_str_if_empty(&mut base.name, &inner.name);
+    fill_str_if_empty(&mut base.symbol, &inner.symbol);
+    fill_str_if_empty(&mut base.uri, &inner.uri);
+    put_pk_if_set(&mut base.mint, inner.mint);
+    put_pk_if_set(&mut base.bonding_curve, inner.bonding_curve);
+    put_pk_if_set(&mut base.user, inner.user);
+    put_pk_if_set(&mut base.creator, inner.creator);
+    put_i64_if_nonzero(&mut base.timestamp, inner.timestamp);
+    put_u64_if_nonzero(&mut base.virtual_token_reserves, inner.virtual_token_reserves);
+    put_u64_if_nonzero(&mut base.virtual_sol_reserves, inner.virtual_sol_reserves);
+    put_u64_if_nonzero(&mut base.real_token_reserves, inner.real_token_reserves);
+    put_u64_if_nonzero(&mut base.token_total_supply, inner.token_total_supply);
+    put_pk_if_set(&mut base.token_program, inner.token_program);
+    base.is_mayhem_mode |= inner.is_mayhem_mode;
+    base.is_cashback_enabled |= inner.is_cashback_enabled;
+    put_pk_if_set(&mut base.quote_mint, inner.quote_mint);
+    put_u64_if_nonzero(&mut base.virtual_quote_reserves, inner.virtual_quote_reserves);
+    put_pk_if_set(&mut base.mint_authority, inner.mint_authority);
+    put_pk_if_set(&mut base.associated_bonding_curve, inner.associated_bonding_curve);
+    put_pk_if_set(&mut base.global, inner.global);
+    put_pk_if_set(&mut base.system_program, inner.system_program);
+    put_pk_if_set(&mut base.associated_token_program, inner.associated_token_program);
+    put_pk_if_set(&mut base.mayhem_program_id, inner.mayhem_program_id);
+    put_pk_if_set(&mut base.global_params, inner.global_params);
+    put_pk_if_set(&mut base.sol_vault, inner.sol_vault);
+    put_pk_if_set(&mut base.mayhem_state, inner.mayhem_state);
+    put_pk_if_set(&mut base.mayhem_token_vault, inner.mayhem_token_vault);
+    put_pk_if_set(&mut base.event_authority, inner.event_authority);
+    put_pk_if_set(&mut base.program, inner.program);
+    put_pk_if_set(&mut base.observed_fee_recipient, inner.observed_fee_recipient);
 }
 
 /// 合并 PumpFun Migrate 事件
@@ -484,6 +522,10 @@ fn merge_pumpfun_create_log_preferred(
     fill_pk(&mut log.user, ix.user);
     fill_pk(&mut log.creator, ix.creator);
     fill_pk(&mut log.token_program, ix.token_program);
+    fill_pk(&mut log.quote_mint, ix.quote_mint);
+    put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
+    log.is_mayhem_mode |= ix.is_mayhem_mode;
+    log.is_cashback_enabled |= ix.is_cashback_enabled;
 }
 
 #[inline]
@@ -498,6 +540,8 @@ fn merge_pumpfun_create_v2_log_preferred(
     fill_pk(&mut log.user, ix.user);
     fill_pk(&mut log.creator, ix.creator);
     fill_pk(&mut log.token_program, ix.token_program);
+    fill_pk(&mut log.quote_mint, ix.quote_mint);
+    put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
     fill_pk(&mut log.mint_authority, ix.mint_authority);
     fill_pk(&mut log.associated_bonding_curve, ix.associated_bonding_curve);
     fill_pk(&mut log.global, ix.global);
@@ -847,7 +891,7 @@ mod tests {
 
         let mut base = DexEvent::PumpFunTrade(PumpFunTradeEvent {
             metadata: metadata.clone(),
-            ix_name: "buy_exact_quote_in_v2".to_string(),
+            ix_name: "buy_exact_quote_in".to_string(),
             quote_mint,
             spendable_quote_in: 1_000,
             min_tokens_out: 2_000,
@@ -855,7 +899,7 @@ mod tests {
             ..Default::default()
         });
 
-        let inner = DexEvent::PumpFunBuyExactSolIn(PumpFunTradeEvent {
+        let inner = DexEvent::PumpFunBuy(PumpFunTradeEvent {
             metadata,
             sol_amount: 1_000,
             token_amount: 2_000,
@@ -868,7 +912,7 @@ mod tests {
         if let DexEvent::PumpFunTrade(t) = base {
             assert_eq!(t.sol_amount, 1_000);
             assert_eq!(t.token_amount, 2_000);
-            assert_eq!(t.ix_name, "buy_exact_quote_in_v2");
+            assert_eq!(t.ix_name, "buy_exact_quote_in");
             assert_eq!(t.quote_mint, quote_mint);
             assert_eq!(t.spendable_quote_in, 1_000);
             assert_eq!(t.min_tokens_out, 2_000);

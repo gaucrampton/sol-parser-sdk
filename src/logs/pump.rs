@@ -30,6 +30,16 @@ pub const CREATE_FEE_SHARING_CONFIG_EVENT: u64 = crate::logs::pump_fees::discrim
 pub const MIGRATE_BONDING_CURVE_CREATOR_EVENT: u64 =
     u64::from_le_bytes([155, 167, 104, 220, 213, 108, 243, 3]);
 
+#[inline]
+pub fn normalize_pumpfun_ix_name(ix_name: &str) -> &str {
+    match ix_name {
+        "buy_v2" => "buy",
+        "sell_v2" => "sell",
+        "buy_exact_quote_in_v2" => "buy_exact_quote_in",
+        other => other,
+    }
+}
+
 // --- binary_read ---------------------------------------------------
 
 #[inline(always)]
@@ -377,6 +387,15 @@ fn parse_create_event_optimized(
         offset += 1;
         let is_cashback_enabled =
             if offset < data.len() { read_bool_unchecked(data, offset) } else { false };
+        offset += 1;
+        let quote_mint = if offset + 32 <= data.len() {
+            read_pubkey_unchecked(data, offset)
+        } else {
+            Pubkey::default()
+        };
+        offset += 32;
+        let virtual_quote_reserves =
+            if offset + 8 <= data.len() { read_u64_unchecked(data, offset) } else { 0 };
 
         let metadata = EventMetadata {
             signature,
@@ -406,6 +425,8 @@ fn parse_create_event_optimized(
             token_program,
             is_mayhem_mode,
             is_cashback_enabled,
+            quote_mint,
+            virtual_quote_reserves,
         }))
     }
 }
@@ -415,7 +436,8 @@ fn parse_create_event_optimized(
 /// 根据 ix_name 返回不同的事件类型:
 /// - "buy" -> DexEvent::PumpFunBuy
 /// - "sell" -> DexEvent::PumpFunSell
-/// - "buy_exact_sol_in" / "buy_exact_quote_in" -> DexEvent::PumpFunBuyExactSolIn
+/// - "buy_exact_sol_in" -> DexEvent::PumpFunBuyExactSolIn
+/// - "buy_exact_quote_in" -> DexEvent::PumpFunBuy (exact quote args preserved on fields)
 /// - 其他/空 -> DexEvent::PumpFunTrade (兼容旧版本)
 #[inline(always)]
 fn parse_trade_event_optimized(
@@ -516,6 +538,7 @@ fn parse_trade_event_optimized(
         } else {
             String::new()
         };
+        let ix_name = normalize_pumpfun_ix_name(&ix_name).to_string();
 
         // mayhem_mode: bool (1 byte), cashback_fee_basis_points (8), cashback (8) - PUMP_CASHBACK_README
         let mayhem_mode =
@@ -606,11 +629,10 @@ fn parse_trade_event_optimized(
 
         // 根据 ix_name 返回不同的事件类型，支持用户过滤特定交易类型
         match ix_name.as_str() {
-            "buy" | "buy_v2" => Some(DexEvent::PumpFunBuy(trade_event)),
-            "sell" | "sell_v2" => Some(DexEvent::PumpFunSell(trade_event)),
-            "buy_exact_sol_in" | "buy_exact_quote_in" | "buy_exact_quote_in_v2" => {
-                Some(DexEvent::PumpFunBuyExactSolIn(trade_event))
-            }
+            "buy" => Some(DexEvent::PumpFunBuy(trade_event)),
+            "sell" => Some(DexEvent::PumpFunSell(trade_event)),
+            "buy_exact_sol_in" => Some(DexEvent::PumpFunBuyExactSolIn(trade_event)),
+            "buy_exact_quote_in" => Some(DexEvent::PumpFunBuy(trade_event)),
             _ => Some(DexEvent::PumpFunTrade(trade_event)), // 兼容旧版本或未知类型
         }
     }
@@ -750,7 +772,8 @@ pub fn is_event_type(log: &str, discriminator: u64) -> bool {
 /// Returns different event types based on ix_name:
 /// - "buy" -> DexEvent::PumpFunBuy
 /// - "sell" -> DexEvent::PumpFunSell
-/// - "buy_exact_sol_in" / "buy_exact_quote_in" -> DexEvent::PumpFunBuyExactSolIn
+/// - "buy_exact_sol_in" -> DexEvent::PumpFunBuyExactSolIn
+/// - "buy_exact_quote_in" -> DexEvent::PumpFunBuy (exact quote args preserved on fields)
 /// - other/empty -> DexEvent::PumpFunTrade (backward compatible)
 #[inline(always)]
 pub fn parse_trade_from_data(
@@ -845,6 +868,7 @@ pub fn parse_trade_from_data(
         } else {
             String::new()
         };
+        let ix_name = normalize_pumpfun_ix_name(&ix_name).to_string();
 
         // mayhem_mode (1), cashback_fee_basis_points (8), cashback (8) - PUMP_CASHBACK_README
         let mayhem_mode =
@@ -926,11 +950,10 @@ pub fn parse_trade_from_data(
 
         // 根据 ix_name 返回不同的事件类型
         match ix_name.as_str() {
-            "buy" | "buy_v2" => Some(DexEvent::PumpFunBuy(trade_event)),
-            "sell" | "sell_v2" => Some(DexEvent::PumpFunSell(trade_event)),
-            "buy_exact_sol_in" | "buy_exact_quote_in" | "buy_exact_quote_in_v2" => {
-                Some(DexEvent::PumpFunBuyExactSolIn(trade_event))
-            }
+            "buy" => Some(DexEvent::PumpFunBuy(trade_event)),
+            "sell" => Some(DexEvent::PumpFunSell(trade_event)),
+            "buy_exact_sol_in" => Some(DexEvent::PumpFunBuyExactSolIn(trade_event)),
+            "buy_exact_quote_in" => Some(DexEvent::PumpFunBuy(trade_event)),
             _ => Some(DexEvent::PumpFunTrade(trade_event)),
         }
     }
@@ -1042,6 +1065,15 @@ pub fn parse_create_from_data(data: &[u8], metadata: EventMetadata) -> Option<De
         offset += 1;
         let is_cashback_enabled =
             if offset < data.len() { read_bool_unchecked(data, offset) } else { false };
+        offset += 1;
+        let quote_mint = if offset + 32 <= data.len() {
+            read_pubkey_unchecked(data, offset)
+        } else {
+            Pubkey::default()
+        };
+        offset += 32;
+        let virtual_quote_reserves =
+            if offset + 8 <= data.len() { read_u64_unchecked(data, offset) } else { 0 };
 
         Some(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
             metadata,
@@ -1060,6 +1092,8 @@ pub fn parse_create_from_data(data: &[u8], metadata: EventMetadata) -> Option<De
             token_program,
             is_mayhem_mode,
             is_cashback_enabled,
+            quote_mint,
+            virtual_quote_reserves,
         }))
     }
 }

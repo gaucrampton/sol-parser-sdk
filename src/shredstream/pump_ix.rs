@@ -1076,7 +1076,7 @@ fn parse_buy_v2_instruction(
         total_claimed_tokens: 0,
         current_sol_volume: 0,
         last_update_timestamp: 0,
-        ix_name: "buy_v2".to_string(),
+        ix_name: "buy".to_string(),
         mayhem_mode: is_mayhem_mode,
         cashback_fee_basis_points: 0,
         cashback: 0,
@@ -1126,7 +1126,7 @@ fn parse_buy_exact_quote_in_v2_instruction(
         recent_blockhash: None,
     };
 
-    Some(DexEvent::PumpFunBuyExactSolIn(PumpFunTradeEvent {
+    Some(DexEvent::PumpFunBuy(PumpFunTradeEvent {
         metadata,
         mint,
         quote_mint: get_account(2).unwrap_or_default(),
@@ -1181,7 +1181,7 @@ fn parse_buy_exact_quote_in_v2_instruction(
         total_claimed_tokens: 0,
         current_sol_volume: 0,
         last_update_timestamp: 0,
-        ix_name: "buy_exact_quote_in_v2".to_string(),
+        ix_name: "buy_exact_quote_in".to_string(),
         mayhem_mode: is_mayhem_mode,
         cashback_fee_basis_points: 0,
         cashback: 0,
@@ -1282,7 +1282,7 @@ fn parse_sell_v2_instruction(
         total_claimed_tokens: 0,
         current_sol_volume: 0,
         last_update_timestamp: 0,
-        ix_name: "sell_v2".to_string(),
+        ix_name: "sell".to_string(),
         mayhem_mode: false,
         cashback_fee_basis_points: 0,
         cashback: 0,
@@ -1407,8 +1407,8 @@ mod tests {
         .expect("exact quote buy");
 
         match exact_quote {
-            DexEvent::PumpFunBuyExactSolIn(t) => {
-                assert_eq!(t.ix_name, "buy_exact_quote_in_v2");
+            DexEvent::PumpFunBuy(t) => {
+                assert_eq!(t.ix_name, "buy_exact_quote_in");
                 assert_eq!(t.spendable_quote_in, 500);
                 assert_eq!(t.min_tokens_out, 600);
                 assert_eq!(t.max_sol_cost, 0);

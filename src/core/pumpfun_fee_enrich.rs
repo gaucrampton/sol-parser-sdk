@@ -7,7 +7,9 @@ use std::collections::HashMap;
 
 use solana_sdk::pubkey::Pubkey;
 
-use crate::core::events::{DexEvent, PumpFunTradeEvent};
+use crate::core::events::{
+    DexEvent, PumpFunCreateTokenEvent, PumpFunCreateV2TokenEvent, PumpFunTradeEvent,
+};
 
 fn pumpfun_buy_like_mint_fee(e: &DexEvent) -> Option<(Pubkey, Pubkey)> {
     match e {
@@ -64,6 +66,91 @@ fn collect_create_cashback_and_mayhem(events: &[DexEvent]) -> HashMap<Pubkey, (b
 }
 
 #[inline]
+fn collect_create_events_by_mint(events: &[DexEvent]) -> HashMap<Pubkey, PumpFunCreateTokenEvent> {
+    let mut m: HashMap<Pubkey, PumpFunCreateTokenEvent> = HashMap::new();
+    for e in events {
+        if let DexEvent::PumpFunCreate(c) = e {
+            if c.mint != Pubkey::default() {
+                m.entry(c.mint).or_insert_with(|| c.clone());
+            }
+        }
+    }
+    m
+}
+
+#[inline]
+fn fill_str_if_empty(to: &mut String, from: &str) {
+    if to.is_empty() && !from.is_empty() {
+        to.push_str(from);
+    }
+}
+
+#[inline]
+fn fill_pk_if_default(to: &mut Pubkey, from: Pubkey) {
+    if *to == Pubkey::default() && from != Pubkey::default() {
+        *to = from;
+    }
+}
+
+#[inline]
+fn fill_u64_if_zero(to: &mut u64, from: u64) {
+    if *to == 0 && from != 0 {
+        *to = from;
+    }
+}
+
+#[inline]
+fn fill_i64_if_zero(to: &mut i64, from: i64) {
+    if *to == 0 && from != 0 {
+        *to = from;
+    }
+}
+
+#[inline]
+fn fill_create_v2_from_create(
+    create_v2: &mut PumpFunCreateV2TokenEvent,
+    create: &PumpFunCreateTokenEvent,
+) {
+    fill_str_if_empty(&mut create_v2.name, &create.name);
+    fill_str_if_empty(&mut create_v2.symbol, &create.symbol);
+    fill_str_if_empty(&mut create_v2.uri, &create.uri);
+    fill_pk_if_default(&mut create_v2.bonding_curve, create.bonding_curve);
+    fill_pk_if_default(&mut create_v2.user, create.user);
+    fill_pk_if_default(&mut create_v2.creator, create.creator);
+    fill_pk_if_default(&mut create_v2.token_program, create.token_program);
+    fill_pk_if_default(&mut create_v2.quote_mint, create.quote_mint);
+    fill_i64_if_zero(&mut create_v2.timestamp, create.timestamp);
+    fill_u64_if_zero(&mut create_v2.virtual_token_reserves, create.virtual_token_reserves);
+    fill_u64_if_zero(&mut create_v2.virtual_sol_reserves, create.virtual_sol_reserves);
+    fill_u64_if_zero(&mut create_v2.real_token_reserves, create.real_token_reserves);
+    fill_u64_if_zero(&mut create_v2.token_total_supply, create.token_total_supply);
+    fill_u64_if_zero(&mut create_v2.virtual_quote_reserves, create.virtual_quote_reserves);
+    create_v2.is_mayhem_mode |= create.is_mayhem_mode;
+    create_v2.is_cashback_enabled |= create.is_cashback_enabled;
+}
+
+/// Copy the official `CreateEvent` payload onto the same-mint `create_v2` instruction event.
+/// The `create_v2` instruction itself carries accounts and flags; the event payload carries the
+/// initial reserves and quote mint used by quote-denominated pools.
+pub fn enrich_create_v2_from_create_events(events: &mut [DexEvent]) {
+    let creates = collect_create_events_by_mint(events);
+    if creates.is_empty() {
+        return;
+    }
+
+    for e in events.iter_mut() {
+        if let DexEvent::PumpFunCreateV2(create_v2) = e {
+            if create_v2.mint == Pubkey::default() {
+                continue;
+            }
+            if let Some(create) = creates.get(&create_v2.mint) {
+                fill_create_v2_from_create(create_v2, create);
+            }
+        }
+    }
+}
+
+#[inline]
 fn trade_event_mut(e: &mut DexEvent) -> Option<&mut PumpFunTradeEvent> {
     match e {
         DexEvent::PumpFunTrade(t)
@@ -99,6 +186,7 @@ pub fn enrich_pumpfun_trades_from_create_instructions(events: &mut [DexEvent]) {
 
 /// 合并调用：fee 回填 + Create→Trade 标志（gRPC / Shred 在 `merge` 之后调用一次即可）。
 pub fn enrich_pumpfun_same_tx_post_merge(events: &mut [DexEvent]) {
+    enrich_create_v2_from_create_events(events);
     enrich_create_v2_observed_fee_recipient(events);
     enrich_pumpfun_trades_from_create_instructions(events);
 }
@@ -106,7 +194,7 @@ pub fn enrich_pumpfun_same_tx_post_merge(events: &mut [DexEvent]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::events::{EventMetadata, PumpFunCreateV2TokenEvent};
+    use crate::core::events::EventMetadata;
     use solana_sdk::signature::Signature;
 
     #[test]
@@ -180,6 +268,58 @@ mod tests {
             assert!(t.track_volume);
         } else {
             panic!("expected trade");
+        }
+    }
+
+    #[test]
+    fn enrich_copies_quote_pool_create_payload_to_create_v2() {
+        let sig = Signature::default();
+        let mint = Pubkey::new_unique();
+        let quote_mint = Pubkey::new_unique();
+        let token_program = Pubkey::new_unique();
+        let meta = EventMetadata {
+            signature: sig,
+            slot: 1,
+            tx_index: 0,
+            block_time_us: 0,
+            grpc_recv_us: 0,
+            recent_blockhash: None,
+        };
+        let mut events: Vec<DexEvent> = vec![
+            DexEvent::PumpFunCreateV2(PumpFunCreateV2TokenEvent {
+                metadata: meta.clone(),
+                mint,
+                ..Default::default()
+            }),
+            DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+                metadata: meta,
+                name: "USD Coin Pool".to_string(),
+                symbol: "USDCX".to_string(),
+                uri: "https://example.invalid/token.json".to_string(),
+                mint,
+                timestamp: 42,
+                virtual_token_reserves: 1_073_000_000_000_000,
+                virtual_sol_reserves: 0,
+                real_token_reserves: 793_100_000_000_000,
+                token_total_supply: 1_000_000_000_000_000,
+                token_program,
+                is_cashback_enabled: true,
+                quote_mint,
+                virtual_quote_reserves: 4_292_000_000,
+                ..Default::default()
+            }),
+        ];
+
+        enrich_create_v2_from_create_events(&mut events);
+
+        if let DexEvent::PumpFunCreateV2(c) = &events[0] {
+            assert_eq!(c.quote_mint, quote_mint);
+            assert_eq!(c.virtual_quote_reserves, 4_292_000_000);
+            assert_eq!(c.token_program, token_program);
+            assert!(c.is_cashback_enabled);
+            assert_eq!(c.name, "USD Coin Pool");
+        } else {
+            panic!("expected CreateV2");
         }
     }
 }
