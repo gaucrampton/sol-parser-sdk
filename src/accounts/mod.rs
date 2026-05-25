@@ -1,6 +1,7 @@
 pub mod nonce;
 pub mod program_ids;
 pub mod pumpswap;
+pub mod raydium_clmm;
 pub mod rpc_wallet;
 pub mod token;
 pub mod utils;
@@ -44,6 +45,9 @@ pub fn parse_account_unified(
                         | EventType::AccountPumpFunUserVolumeAccumulator
                         | EventType::AccountPumpSwapGlobalConfig
                         | EventType::AccountPumpSwapPool
+                        | EventType::AccountRaydiumClmmAmmConfig
+                        | EventType::AccountRaydiumClmmPoolState
+                        | EventType::AccountRaydiumClmmTickArrayState
                 )
             });
             if !should_parse {
@@ -53,22 +57,35 @@ pub fn parse_account_unified(
     }
 
     if account.owner == PUMPSWAP_PROGRAM_ID {
-        if let Some(filter) = event_type_filter {
-            if filter.should_include(crate::grpc::EventType::AccountPumpSwapGlobalConfig)
+        let should_parse = event_type_filter.map_or(true, |filter| {
+            filter.should_include(crate::grpc::EventType::AccountPumpSwapGlobalConfig)
                 || filter.should_include(crate::grpc::EventType::AccountPumpSwapPool)
-            {
-                let event = parse_pumpswap_account(account, metadata.clone());
-                if event.is_some() {
-                    return event;
-                }
+        });
+        if should_parse {
+            let event = parse_pumpswap_account(account, metadata.clone());
+            if event.is_some() {
+                return event;
+            }
+        }
+    }
+    if account.owner == crate::instr::program_ids::RAYDIUM_CLMM_PROGRAM_ID {
+        let should_parse = event_type_filter.map_or(true, |filter| {
+            filter.should_include(crate::grpc::EventType::AccountRaydiumClmmAmmConfig)
+                || filter.should_include(crate::grpc::EventType::AccountRaydiumClmmPoolState)
+                || filter.should_include(crate::grpc::EventType::AccountRaydiumClmmTickArrayState)
+        });
+        if should_parse {
+            let event = raydium_clmm::parse_account(account, metadata.clone());
+            if event.is_some() {
+                return event;
             }
         }
     }
     if account.owner == crate::grpc::program_ids::PUMPFUN_PROGRAM
         || account.owner == crate::instr::program_ids::PUMP_FEES_PROGRAM_ID
     {
-        if let Some(filter) = event_type_filter {
-            if filter.should_include(crate::grpc::EventType::AccountPumpFunGlobal)
+        let should_parse = event_type_filter.map_or(true, |filter| {
+            filter.should_include(crate::grpc::EventType::AccountPumpFunGlobal)
                 || filter.should_include(crate::grpc::EventType::AccountPumpFunBondingCurve)
                 || filter.should_include(crate::grpc::EventType::AccountPumpFunFeeConfig)
                 || filter.should_include(crate::grpc::EventType::AccountPumpFunSharingConfig)
@@ -76,11 +93,11 @@ pub fn parse_account_unified(
                     .should_include(crate::grpc::EventType::AccountPumpFunGlobalVolumeAccumulator)
                 || filter
                     .should_include(crate::grpc::EventType::AccountPumpFunUserVolumeAccumulator)
-            {
-                let event = parse_pumpfun_account(account, metadata.clone());
-                if event.is_some() {
-                    return event;
-                }
+        });
+        if should_parse {
+            let event = parse_pumpfun_account(account, metadata.clone());
+            if event.is_some() {
+                return event;
             }
         }
     }

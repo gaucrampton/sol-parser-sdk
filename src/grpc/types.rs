@@ -358,6 +358,9 @@ pub enum EventType {
 
     AccountPumpSwapGlobalConfig,
     AccountPumpSwapPool,
+    AccountRaydiumClmmAmmConfig,
+    AccountRaydiumClmmPoolState,
+    AccountRaydiumClmmTickArrayState,
 }
 
 #[derive(Debug, Clone)]
@@ -565,6 +568,9 @@ impl EventTypeFilter {
                     | EventType::RaydiumClmmUpdateRewardInfos
                     | EventType::RaydiumClmmOpenPositionWithTokenExtNft
                     | EventType::RaydiumClmmCollectFee
+                    | EventType::AccountRaydiumClmmAmmConfig
+                    | EventType::AccountRaydiumClmmPoolState
+                    | EventType::AccountRaydiumClmmTickArrayState
             )
         })
     }
@@ -711,6 +717,11 @@ pub fn event_type_from_dex_event(event: &crate::core::events::DexEvent) -> Optio
         DexEvent::RaydiumClmmSettleLimitOrder(_) => Some(EventType::RaydiumClmmSettleLimitOrder),
         DexEvent::RaydiumClmmUpdateRewardInfos(_) => Some(EventType::RaydiumClmmUpdateRewardInfos),
         DexEvent::RaydiumClmmCollectFee(_) => Some(EventType::RaydiumClmmCollectFee),
+        DexEvent::RaydiumClmmAmmConfigAccount(_) => Some(EventType::AccountRaydiumClmmAmmConfig),
+        DexEvent::RaydiumClmmPoolStateAccount(_) => Some(EventType::AccountRaydiumClmmPoolState),
+        DexEvent::RaydiumClmmTickArrayStateAccount(_) => {
+            Some(EventType::AccountRaydiumClmmTickArrayState)
+        }
         DexEvent::RaydiumCpmmSwap(_) => Some(EventType::RaydiumCpmmSwap),
         DexEvent::RaydiumCpmmDeposit(_) => Some(EventType::RaydiumCpmmDeposit),
         DexEvent::RaydiumCpmmWithdraw(_) => Some(EventType::RaydiumCpmmWithdraw),

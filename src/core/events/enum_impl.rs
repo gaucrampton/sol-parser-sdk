@@ -71,6 +71,9 @@ pub enum DexEvent {
     RaydiumClmmSettleLimitOrder(RaydiumClmmSettleLimitOrderEvent),
     RaydiumClmmUpdateRewardInfos(RaydiumClmmUpdateRewardInfosEvent),
     RaydiumClmmCollectFee(RaydiumClmmCollectFeeEvent),
+    RaydiumClmmAmmConfigAccount(RaydiumClmmAmmConfigAccountEvent),
+    RaydiumClmmPoolStateAccount(RaydiumClmmPoolStateAccountEvent),
+    RaydiumClmmTickArrayStateAccount(RaydiumClmmTickArrayStateAccountEvent),
 
     // Raydium CPMM 事件
     RaydiumCpmmSwap(RaydiumCpmmSwapEvent),
@@ -200,6 +203,9 @@ impl DexEvent {
             DexEvent::RaydiumClmmSettleLimitOrder(e) => &e.metadata,
             DexEvent::RaydiumClmmUpdateRewardInfos(e) => &e.metadata,
             DexEvent::RaydiumClmmCollectFee(e) => &e.metadata,
+            DexEvent::RaydiumClmmAmmConfigAccount(e) => &e.metadata,
+            DexEvent::RaydiumClmmPoolStateAccount(e) => &e.metadata,
+            DexEvent::RaydiumClmmTickArrayStateAccount(e) => &e.metadata,
 
             // Raydium CPMM 事件
             DexEvent::RaydiumCpmmSwap(e) => &e.metadata,
@@ -310,6 +316,9 @@ impl DexEvent {
             DexEvent::RaydiumClmmSettleLimitOrder(e) => Some(&mut e.metadata),
             DexEvent::RaydiumClmmUpdateRewardInfos(e) => Some(&mut e.metadata),
             DexEvent::RaydiumClmmCollectFee(e) => Some(&mut e.metadata),
+            DexEvent::RaydiumClmmAmmConfigAccount(e) => Some(&mut e.metadata),
+            DexEvent::RaydiumClmmPoolStateAccount(e) => Some(&mut e.metadata),
+            DexEvent::RaydiumClmmTickArrayStateAccount(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmSwap(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmDeposit(e) => Some(&mut e.metadata),
             DexEvent::RaydiumCpmmWithdraw(e) => Some(&mut e.metadata),
