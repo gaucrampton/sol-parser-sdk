@@ -164,7 +164,7 @@ pub(crate) unsafe fn read_trade_event_extensions(
     let buyback_fee_basis_points = read_optional_u64(data, offset);
     let buyback_fee = read_optional_u64(data, offset);
     let shareholders = read_trade_shareholders(data, offset)?;
-    let quote_mint = read_optional_pubkey(data, offset);
+    let quote_mint = normalize_pumpfun_quote_mint(read_optional_pubkey(data, offset));
     let quote_amount = read_optional_u64(data, offset);
     let virtual_quote_reserves = read_optional_u64(data, offset);
     let real_quote_reserves = read_optional_u64(data, offset);
@@ -388,11 +388,11 @@ fn parse_create_event_optimized(
         let is_cashback_enabled =
             if offset < data.len() { read_bool_unchecked(data, offset) } else { false };
         offset += 1;
-        let quote_mint = if offset + 32 <= data.len() {
+        let quote_mint = normalize_pumpfun_quote_mint(if offset + 32 <= data.len() {
             read_pubkey_unchecked(data, offset)
         } else {
             Pubkey::default()
-        };
+        });
         offset += 32;
         let virtual_quote_reserves =
             if offset + 8 <= data.len() { read_u64_unchecked(data, offset) } else { 0 };
@@ -1066,11 +1066,11 @@ pub fn parse_create_from_data(data: &[u8], metadata: EventMetadata) -> Option<De
         let is_cashback_enabled =
             if offset < data.len() { read_bool_unchecked(data, offset) } else { false };
         offset += 1;
-        let quote_mint = if offset + 32 <= data.len() {
+        let quote_mint = normalize_pumpfun_quote_mint(if offset + 32 <= data.len() {
             read_pubkey_unchecked(data, offset)
         } else {
             Pubkey::default()
-        };
+        });
         offset += 32;
         let virtual_quote_reserves =
             if offset + 8 <= data.len() { read_u64_unchecked(data, offset) } else { 0 };

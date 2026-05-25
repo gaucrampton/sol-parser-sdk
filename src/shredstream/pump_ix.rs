@@ -12,8 +12,9 @@ use solana_sdk::transaction::VersionedTransaction;
 
 use crate::accounts::program_ids::SPL_TOKEN_2022_PROGRAM_ID;
 use crate::core::events::{
-    DexEvent, EventMetadata, PumpFunCreateTokenEvent, PumpFunCreateV2TokenEvent,
-    PumpFunMigrateBondingCurveCreatorEvent, PumpFunTradeEvent,
+    normalize_pumpfun_quote_mint, DexEvent, EventMetadata, PumpFunCreateTokenEvent,
+    PumpFunCreateV2TokenEvent, PumpFunMigrateBondingCurveCreatorEvent, PumpFunTradeEvent,
+    PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
 };
 use crate::grpc::types::EventTypeFilter;
 use crate::instr::program_ids::{
@@ -728,6 +729,7 @@ fn parse_buy_instruction(
     Some(DexEvent::PumpFunBuy(PumpFunTradeEvent {
         metadata,
         mint,
+        quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
         global: get_account(0).unwrap_or_default(),
         bonding_curve: get_account(3).unwrap_or_default(),
         bonding_curve_v2: get_account(16).unwrap_or_default(),
@@ -818,6 +820,7 @@ fn parse_sell_instruction(
     Some(DexEvent::PumpFunSell(PumpFunTradeEvent {
         metadata,
         mint,
+        quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
         global: get_account(0).unwrap_or_default(),
         bonding_curve: get_account(3).unwrap_or_default(),
         bonding_curve_v2: if ix_accounts.len() >= 17 {
@@ -929,6 +932,7 @@ fn parse_buy_exact_sol_in_instruction(
     Some(DexEvent::PumpFunBuyExactSolIn(PumpFunTradeEvent {
         metadata,
         mint,
+        quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
         global: get_account(0).unwrap_or_default(),
         bonding_curve: get_account(3).unwrap_or_default(),
         bonding_curve_v2: get_account(16).unwrap_or_default(),
@@ -1025,7 +1029,7 @@ fn parse_buy_v2_instruction(
     Some(DexEvent::PumpFunBuy(PumpFunTradeEvent {
         metadata,
         mint,
-        quote_mint: get_account(2).unwrap_or_default(),
+        quote_mint: normalize_pumpfun_quote_mint(get_account(2).unwrap_or_default()),
         global: get_account(0).unwrap_or_default(),
         bonding_curve: get_account(10).unwrap_or_default(),
         associated_bonding_curve: get_account(11).unwrap_or_default(),
@@ -1129,7 +1133,7 @@ fn parse_buy_exact_quote_in_v2_instruction(
     Some(DexEvent::PumpFunBuy(PumpFunTradeEvent {
         metadata,
         mint,
-        quote_mint: get_account(2).unwrap_or_default(),
+        quote_mint: normalize_pumpfun_quote_mint(get_account(2).unwrap_or_default()),
         global: get_account(0).unwrap_or_default(),
         bonding_curve: get_account(10).unwrap_or_default(),
         associated_bonding_curve: get_account(11).unwrap_or_default(),
@@ -1231,7 +1235,7 @@ fn parse_sell_v2_instruction(
     Some(DexEvent::PumpFunSell(PumpFunTradeEvent {
         metadata,
         mint,
-        quote_mint: get_account(2).unwrap_or_default(),
+        quote_mint: normalize_pumpfun_quote_mint(get_account(2).unwrap_or_default()),
         global: get_account(0).unwrap_or_default(),
         bonding_curve: get_account(10).unwrap_or_default(),
         associated_bonding_curve: get_account(11).unwrap_or_default(),
@@ -1370,6 +1374,7 @@ mod tests {
             DexEvent::PumpFunBuy(t) => {
                 assert_eq!(t.bonding_curve_v2, accounts[16]);
                 assert_eq!(t.buyback_fee_recipient, accounts[17]);
+                assert_eq!(t.quote_mint, PUMPFUN_SOLSCAN_SOL_QUOTE_MINT);
             }
             other => panic!("expected buy variant, got {other:?}"),
         }
@@ -1389,6 +1394,7 @@ mod tests {
                 assert_eq!(t.user_volume_accumulator, accounts[14]);
                 assert_eq!(t.bonding_curve_v2, accounts[15]);
                 assert_eq!(t.buyback_fee_recipient, accounts[16]);
+                assert_eq!(t.quote_mint, PUMPFUN_SOLSCAN_SOL_QUOTE_MINT);
             }
             other => panic!("expected sell variant, got {other:?}"),
         }

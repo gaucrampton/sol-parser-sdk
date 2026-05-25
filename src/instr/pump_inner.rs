@@ -449,7 +449,7 @@ fn parse_create_event_fields(data: &[u8], metadata: EventMetadata) -> Option<Dex
     offset += 1;
     let is_cashback_enabled = data.get(offset).copied().unwrap_or_default() == 1;
     offset += 1;
-    let quote_mint = read_pubkey(data, offset).unwrap_or_default();
+    let quote_mint = normalize_pumpfun_quote_mint(read_pubkey(data, offset).unwrap_or_default());
     offset += 32;
     let virtual_quote_reserves = read_u64_le(data, offset).unwrap_or_default();
 
@@ -539,11 +539,11 @@ fn parse_create_event_inner_zero_copy(data: &[u8], metadata: EventMetadata) -> O
         let is_cashback_enabled =
             if offset < data.len() { read_bool_unchecked(data, offset) } else { false };
         offset += 1;
-        let quote_mint = if offset + 32 <= data.len() {
+        let quote_mint = normalize_pumpfun_quote_mint(if offset + 32 <= data.len() {
             read_pubkey_unchecked(data, offset)
         } else {
             solana_sdk::pubkey::Pubkey::default()
-        };
+        });
         offset += 32;
         let virtual_quote_reserves =
             if offset + 8 <= data.len() { read_u64_unchecked(data, offset) } else { 0 };
@@ -758,7 +758,7 @@ mod tests {
                 assert!(t.is_created_buy);
                 assert_eq!(t.buyback_fee_basis_points, 0);
                 assert!(t.shareholders.is_empty());
-                assert_eq!(t.quote_mint, Pubkey::default());
+                assert_eq!(t.quote_mint, PUMPFUN_SOLSCAN_SOL_QUOTE_MINT);
             }
             other => panic!("expected exact buy trade, got {other:?}"),
         }

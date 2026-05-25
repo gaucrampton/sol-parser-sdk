@@ -44,10 +44,18 @@ pub fn fill_trade_accounts(e: &mut PumpFunTradeEvent, get: &AccountGetter<'_>) {
             }
         }
     };
+    let fill_pumpfun_quote_mint = |to: &mut Pubkey, idx: usize| {
+        if *to == Pubkey::default() || is_pumpfun_solscan_sol_quote_mint(*to) {
+            let from = normalize_pumpfun_quote_mint(get(idx));
+            if from != Pubkey::default() {
+                *to = from;
+            }
+        }
+    };
 
     if is_v2 {
         fill_pk(&mut e.global, 0);
-        fill_pk(&mut e.quote_mint, 2);
+        fill_pumpfun_quote_mint(&mut e.quote_mint, 2);
         fill_pk(&mut e.fee_recipient, 6);
         fill_pk(&mut e.bonding_curve, 10);
         // v2 has explicit base/quote bonding curve accounts; no separate legacy bonding_curve_v2 remaining account.
@@ -84,6 +92,7 @@ pub fn fill_trade_accounts(e: &mut PumpFunTradeEvent, get: &AccountGetter<'_>) {
     }
 
     fill_pk(&mut e.global, 0);
+    e.quote_mint = normalize_pumpfun_quote_mint(e.quote_mint);
     // 指令账户 #1 = fee_recipient（IDL）；仅日志路径时常为 default，补全后可与 mayhem/普通池一致，供 sol-trade-sdk 校验。
     fill_pk(&mut e.fee_recipient, 1);
     fill_pk(&mut e.bonding_curve, 3);

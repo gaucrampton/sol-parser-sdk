@@ -168,6 +168,18 @@ fn put_pk_if_set(to: &mut Pubkey, from: Pubkey) {
 }
 
 #[inline(always)]
+fn put_pumpfun_quote_mint_if_set(to: &mut Pubkey, from: Pubkey) {
+    let from = normalize_pumpfun_quote_mint(from);
+    if from != Pubkey::default()
+        && (*to == Pubkey::default()
+            || is_pumpfun_solscan_sol_quote_mint(*to)
+            || !is_pumpfun_solscan_sol_quote_mint(from))
+    {
+        *to = from;
+    }
+}
+
+#[inline(always)]
 fn put_u64_if_nonzero(to: &mut u64, from: u64) {
     if from != 0 {
         *to = from;
@@ -228,7 +240,7 @@ fn merge_pumpfun_trade(base: &mut PumpFunTradeEvent, inner: PumpFunTradeEvent) {
         if base.shareholders.is_empty() && !inner.shareholders.is_empty() {
             base.shareholders = inner.shareholders;
         }
-        put_pk_if_set(&mut base.quote_mint, inner.quote_mint);
+        put_pumpfun_quote_mint_if_set(&mut base.quote_mint, inner.quote_mint);
         put_u64_if_nonzero(&mut base.quote_amount, inner.quote_amount);
         put_u64_if_nonzero(&mut base.virtual_quote_reserves, inner.virtual_quote_reserves);
         put_u64_if_nonzero(&mut base.real_quote_reserves, inner.real_quote_reserves);
@@ -252,7 +264,7 @@ fn merge_pumpfun_trade(base: &mut PumpFunTradeEvent, inner: PumpFunTradeEvent) {
         if base.shareholders.is_empty() && !inner.shareholders.is_empty() {
             base.shareholders = inner.shareholders;
         }
-        put_pk_if_set(&mut base.quote_mint, inner.quote_mint);
+        put_pumpfun_quote_mint_if_set(&mut base.quote_mint, inner.quote_mint);
         put_u64_if_nonzero(&mut base.quote_amount, inner.quote_amount);
         put_u64_if_nonzero(&mut base.virtual_quote_reserves, inner.virtual_quote_reserves);
         put_u64_if_nonzero(&mut base.real_quote_reserves, inner.real_quote_reserves);
@@ -328,7 +340,7 @@ fn merge_pumpfun_create(base: &mut PumpFunCreateTokenEvent, inner: PumpFunCreate
     base.token_program = inner.token_program;
     base.is_mayhem_mode = inner.is_mayhem_mode;
     base.is_cashback_enabled = inner.is_cashback_enabled;
-    put_pk_if_set(&mut base.quote_mint, inner.quote_mint);
+    put_pumpfun_quote_mint_if_set(&mut base.quote_mint, inner.quote_mint);
     put_u64_if_nonzero(&mut base.virtual_quote_reserves, inner.virtual_quote_reserves);
 }
 
@@ -350,7 +362,7 @@ fn merge_pumpfun_create_v2(base: &mut PumpFunCreateV2TokenEvent, inner: PumpFunC
     put_pk_if_set(&mut base.token_program, inner.token_program);
     base.is_mayhem_mode |= inner.is_mayhem_mode;
     base.is_cashback_enabled |= inner.is_cashback_enabled;
-    put_pk_if_set(&mut base.quote_mint, inner.quote_mint);
+    put_pumpfun_quote_mint_if_set(&mut base.quote_mint, inner.quote_mint);
     put_u64_if_nonzero(&mut base.virtual_quote_reserves, inner.virtual_quote_reserves);
     put_pk_if_set(&mut base.mint_authority, inner.mint_authority);
     put_pk_if_set(&mut base.associated_bonding_curve, inner.associated_bonding_curve);
@@ -450,6 +462,16 @@ fn fill_pk(to: &mut Pubkey, from: Pubkey) {
 }
 
 #[inline(always)]
+fn fill_pumpfun_quote_mint(to: &mut Pubkey, from: Pubkey) {
+    let from = normalize_pumpfun_quote_mint(from);
+    if (*to == Pubkey::default() || is_pumpfun_solscan_sol_quote_mint(*to))
+        && from != Pubkey::default()
+    {
+        *to = from;
+    }
+}
+
+#[inline(always)]
 fn fill_str_if_empty(to: &mut String, from: &str) {
     if to.is_empty() && !from.is_empty() {
         to.push_str(from);
@@ -472,7 +494,7 @@ fn merge_pumpfun_trade_log_preferred(log: &mut PumpFunTradeEvent, ix: PumpFunTra
     fill_pk(&mut log.creator_vault, ix.creator_vault);
     fill_pk(&mut log.fee_recipient, ix.fee_recipient);
     fill_pk(&mut log.creator, ix.creator);
-    fill_pk(&mut log.quote_mint, ix.quote_mint);
+    fill_pumpfun_quote_mint(&mut log.quote_mint, ix.quote_mint);
     fill_pk(&mut log.associated_quote_fee_recipient, ix.associated_quote_fee_recipient);
     fill_pk(&mut log.buyback_fee_recipient, ix.buyback_fee_recipient);
     fill_pk(
@@ -522,7 +544,7 @@ fn merge_pumpfun_create_log_preferred(
     fill_pk(&mut log.user, ix.user);
     fill_pk(&mut log.creator, ix.creator);
     fill_pk(&mut log.token_program, ix.token_program);
-    fill_pk(&mut log.quote_mint, ix.quote_mint);
+    fill_pumpfun_quote_mint(&mut log.quote_mint, ix.quote_mint);
     put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
     log.is_mayhem_mode |= ix.is_mayhem_mode;
     log.is_cashback_enabled |= ix.is_cashback_enabled;
@@ -540,7 +562,7 @@ fn merge_pumpfun_create_v2_log_preferred(
     fill_pk(&mut log.user, ix.user);
     fill_pk(&mut log.creator, ix.creator);
     fill_pk(&mut log.token_program, ix.token_program);
-    fill_pk(&mut log.quote_mint, ix.quote_mint);
+    fill_pumpfun_quote_mint(&mut log.quote_mint, ix.quote_mint);
     put_u64_if_nonzero(&mut log.virtual_quote_reserves, ix.virtual_quote_reserves);
     fill_pk(&mut log.mint_authority, ix.mint_authority);
     fill_pk(&mut log.associated_bonding_curve, ix.associated_bonding_curve);
@@ -917,6 +939,25 @@ mod tests {
             assert_eq!(t.spendable_quote_in, 1_000);
             assert_eq!(t.min_tokens_out, 2_000);
             assert_eq!(t.associated_quote_user, associated_quote_user);
+        } else {
+            panic!("Expected PumpFunTrade event");
+        }
+    }
+
+    #[test]
+    fn merge_replaces_sol_quote_sentinel_with_real_quote_mint() {
+        let quote_mint = Pubkey::new_unique();
+        let mut base = DexEvent::PumpFunTrade(PumpFunTradeEvent {
+            quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
+            ..Default::default()
+        });
+
+        let inner = DexEvent::PumpFunBuy(PumpFunTradeEvent { quote_mint, ..Default::default() });
+
+        merge_events(&mut base, inner);
+
+        if let DexEvent::PumpFunTrade(t) = base {
+            assert_eq!(t.quote_mint, quote_mint);
         } else {
             panic!("Expected PumpFunTrade event");
         }

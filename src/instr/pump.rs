@@ -229,6 +229,7 @@ fn parse_buy_instruction(
     let trade_event = PumpFunTradeEvent {
         metadata,
         mint,
+        quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
         is_buy: true,
         global: get_account(accounts, 0).unwrap_or_default(),
         fee_recipient: get_account(accounts, 1).unwrap_or_default(),
@@ -352,11 +353,11 @@ fn parse_sell_instruction(
     Some(DexEvent::PumpFunSell(PumpFunTradeEvent {
         metadata,
         mint,
-        quote_mint: if v2_accounts {
+        quote_mint: normalize_pumpfun_quote_mint(if v2_accounts {
             get_account(accounts, 2).unwrap_or_default()
         } else {
             Pubkey::default()
-        },
+        }),
         is_buy: false,
         global: get_account(accounts, global_idx).unwrap_or_default(),
         bonding_curve: get_account(accounts, bonding_curve_idx).unwrap_or_default(),
@@ -479,7 +480,7 @@ fn parse_buy_v2_instruction(
     let trade_event = PumpFunTradeEvent {
         metadata,
         mint: accounts[1],
-        quote_mint: accounts[2],
+        quote_mint: normalize_pumpfun_quote_mint(accounts[2]),
         is_buy: true,
         global: accounts[0],
         bonding_curve: accounts[10],
@@ -877,6 +878,7 @@ mod tests {
                 assert_eq!(t.associated_user, acc[5]);
                 assert_eq!(t.event_authority, acc[10]);
                 assert_eq!(t.fee_program, acc[15]);
+                assert_eq!(t.quote_mint, PUMPFUN_SOLSCAN_SOL_QUOTE_MINT);
                 assert_eq!(t.bonding_curve_v2, acc[16]);
                 assert_eq!(t.buyback_fee_recipient, acc[17]);
                 assert_eq!(t.ix_name, "buy_exact_sol_in");

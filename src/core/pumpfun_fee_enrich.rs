@@ -8,7 +8,8 @@ use std::collections::HashMap;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::core::events::{
-    DexEvent, PumpFunCreateTokenEvent, PumpFunCreateV2TokenEvent, PumpFunTradeEvent,
+    is_pumpfun_solscan_sol_quote_mint, normalize_pumpfun_quote_mint, DexEvent,
+    PumpFunCreateTokenEvent, PumpFunCreateV2TokenEvent, PumpFunTradeEvent,
 };
 
 fn pumpfun_buy_like_mint_fee(e: &DexEvent) -> Option<(Pubkey, Pubkey)> {
@@ -93,6 +94,16 @@ fn fill_pk_if_default(to: &mut Pubkey, from: Pubkey) {
 }
 
 #[inline]
+fn fill_pumpfun_quote_mint_if_default(to: &mut Pubkey, from: Pubkey) {
+    let from = normalize_pumpfun_quote_mint(from);
+    if (*to == Pubkey::default() || is_pumpfun_solscan_sol_quote_mint(*to))
+        && from != Pubkey::default()
+    {
+        *to = from;
+    }
+}
+
+#[inline]
 fn fill_u64_if_zero(to: &mut u64, from: u64) {
     if *to == 0 && from != 0 {
         *to = from;
@@ -118,7 +129,7 @@ fn fill_create_v2_from_create(
     fill_pk_if_default(&mut create_v2.user, create.user);
     fill_pk_if_default(&mut create_v2.creator, create.creator);
     fill_pk_if_default(&mut create_v2.token_program, create.token_program);
-    fill_pk_if_default(&mut create_v2.quote_mint, create.quote_mint);
+    fill_pumpfun_quote_mint_if_default(&mut create_v2.quote_mint, create.quote_mint);
     fill_i64_if_zero(&mut create_v2.timestamp, create.timestamp);
     fill_u64_if_zero(&mut create_v2.virtual_token_reserves, create.virtual_token_reserves);
     fill_u64_if_zero(&mut create_v2.virtual_sol_reserves, create.virtual_sol_reserves);
