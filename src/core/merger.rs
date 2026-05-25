@@ -77,6 +77,17 @@ pub fn merge_events(base: &mut DexEvent, inner: DexEvent) {
         (RaydiumClmmSwap(b), RaydiumClmmSwap(i)) => merge_generic(b, i),
         (RaydiumClmmIncreaseLiquidity(b), RaydiumClmmIncreaseLiquidity(i)) => merge_generic(b, i),
         (RaydiumClmmDecreaseLiquidity(b), RaydiumClmmDecreaseLiquidity(i)) => merge_generic(b, i),
+        (RaydiumClmmLiquidityChange(b), RaydiumClmmLiquidityChange(i)) => merge_generic(b, i),
+        (RaydiumClmmConfigChange(b), RaydiumClmmConfigChange(i)) => merge_generic(b, i),
+        (RaydiumClmmCreatePersonalPosition(b), RaydiumClmmCreatePersonalPosition(i)) => {
+            merge_generic(b, i)
+        }
+        (RaydiumClmmLiquidityCalculate(b), RaydiumClmmLiquidityCalculate(i)) => merge_generic(b, i),
+        (RaydiumClmmOpenLimitOrder(b), RaydiumClmmOpenLimitOrder(i)) => merge_generic(b, i),
+        (RaydiumClmmIncreaseLimitOrder(b), RaydiumClmmIncreaseLimitOrder(i)) => merge_generic(b, i),
+        (RaydiumClmmDecreaseLimitOrder(b), RaydiumClmmDecreaseLimitOrder(i)) => merge_generic(b, i),
+        (RaydiumClmmSettleLimitOrder(b), RaydiumClmmSettleLimitOrder(i)) => merge_generic(b, i),
+        (RaydiumClmmUpdateRewardInfos(b), RaydiumClmmUpdateRewardInfos(i)) => merge_generic(b, i),
         (RaydiumClmmCreatePool(b), RaydiumClmmCreatePool(i)) => merge_generic(b, i),
         (RaydiumClmmOpenPosition(b), RaydiumClmmOpenPosition(i)) => merge_generic(b, i),
         (RaydiumClmmClosePosition(b), RaydiumClmmClosePosition(i)) => merge_generic(b, i),

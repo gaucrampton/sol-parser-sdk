@@ -899,40 +899,25 @@ pub struct RaydiumCpmmWithdrawEvent {
     pub user: Pubkey,
 }
 
-/// Raydium CLMM Swap Event (基于IDL SwapEvent + swap指令定义)
+/// Raydium CLMM Swap Event (IDL `SwapEvent`)
 #[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaydiumClmmSwapEvent {
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub metadata: EventMetadata,
 
-    // === IDL SwapEvent 事件字段 (Borsh 序列化字段) ===
     pub pool_state: Pubkey,
+    pub sender: Pubkey,
     pub token_account_0: Pubkey,
     pub token_account_1: Pubkey,
     pub amount_0: u64,
+    pub transfer_fee_0: u64,
     pub amount_1: u64,
+    pub transfer_fee_1: u64,
     pub zero_for_one: bool,
     pub sqrt_price_x64: u128,
     pub liquidity: u128,
-
-    // === 非 Borsh 字段 ===
-    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
-    pub sender: Pubkey,
-    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
-    pub transfer_fee_0: u64,
-    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
-    pub transfer_fee_1: u64,
-    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub tick: i32,
-    // === 指令参数字段 (暂时注释，以后可能会用到，AI不要删除) ===
-    // pub amount: u64,
-    // pub other_amount_threshold: u64,
-    // pub sqrt_price_limit_x64: u128,
-    // pub is_base_input: bool,
-
-    // === 指令账户字段 (暂时注释，以后可能会用到，AI不要删除) ===
-    // TODO: 根据Raydium CLMM swap指令IDL添加账户字段
 }
 
 /// Raydium CLMM Close Position Event
@@ -944,78 +929,228 @@ pub struct RaydiumClmmClosePositionEvent {
     pub position_nft_mint: Pubkey,
 }
 
-/// Raydium CLMM Decrease Liquidity Event
+/// Raydium CLMM Decrease Liquidity Event (IDL `DecreaseLiquidityEvent`)
 #[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaydiumClmmDecreaseLiquidityEvent {
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub metadata: EventMetadata,
 
-    // === Borsh 序列化字段 ===
-    pub pool: Pubkey,
     pub position_nft_mint: Pubkey,
-    pub amount0_min: u64,
-    pub amount1_min: u64,
     pub liquidity: u128,
+    pub decrease_amount_0: u64,
+    pub decrease_amount_1: u64,
+    pub fee_amount_0: u64,
+    pub fee_amount_1: u64,
+    pub reward_amounts: [u64; 3],
+    pub transfer_fee_0: u64,
+    pub transfer_fee_1: u64,
 
-    // === 非 Borsh 字段 ===
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub pool: Pubkey,
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub amount0_min: u64,
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub amount1_min: u64,
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub user: Pubkey,
 }
 
 /// Raydium CLMM Collect Fee Event
-#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+///
+/// Raydium emits separate `CollectPersonalFeeEvent` and
+/// `CollectProtocolFeeEvent` layouts. They are normalized into this single SDK
+/// event, so this struct intentionally does not derive `BorshDeserialize`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaydiumClmmCollectFeeEvent {
-    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub metadata: EventMetadata,
-
-    // === Borsh 序列化字段 ===
     pub pool_state: Pubkey,
     pub position_nft_mint: Pubkey,
+    pub recipient_token_account_0: Pubkey,
+    pub recipient_token_account_1: Pubkey,
     pub amount_0: u64,
     pub amount_1: u64,
 }
 
-/// Raydium CLMM Create Pool Event
+/// Raydium CLMM Create Pool Event (IDL `PoolCreatedEvent`)
 #[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaydiumClmmCreatePoolEvent {
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub metadata: EventMetadata,
 
-    // === Borsh 序列化字段（从 inner instruction 事件）===
-    pub pool: Pubkey,
     pub token_0_mint: Pubkey,
     pub token_1_mint: Pubkey,
     pub tick_spacing: u16,
-    pub fee_rate: u32,
+    pub pool: Pubkey,
     pub sqrt_price_x64: u128,
+    pub tick: i32,
+    pub token_vault_0: Pubkey,
+    pub token_vault_1: Pubkey,
 
-    // === 非 Borsh 字段（从指令或账户） ===
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub fee_rate: u32,
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub creator: Pubkey,
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub open_time: u64,
 }
 
-/// Raydium CLMM Increase Liquidity Event
+/// Raydium CLMM Increase Liquidity Event (IDL `IncreaseLiquidityEvent`)
 #[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaydiumClmmIncreaseLiquidityEvent {
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub metadata: EventMetadata,
 
-    // === Borsh 序列化字段 ===
-    pub pool: Pubkey,
     pub position_nft_mint: Pubkey,
-    pub amount0_max: u64,
-    pub amount1_max: u64,
     pub liquidity: u128,
+    pub amount_0: u64,
+    pub amount_1: u64,
+    pub amount_0_transfer_fee: u64,
+    pub amount_1_transfer_fee: u64,
 
-    // === 非 Borsh 字段 ===
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub pool: Pubkey,
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub amount0_max: u64,
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub amount1_max: u64,
     #[cfg_attr(feature = "parse-borsh", borsh(skip))]
     pub user: Pubkey,
+}
+
+/// Raydium CLMM Liquidity Change Event (IDL `LiquidityChangeEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmLiquidityChangeEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub pool_state: Pubkey,
+    pub tick: i32,
+    pub tick_lower: i32,
+    pub tick_upper: i32,
+    pub liquidity_before: u128,
+    pub liquidity_after: u128,
+}
+
+/// Raydium CLMM Config Change Event (IDL `ConfigChangeEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmConfigChangeEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub index: u16,
+    pub owner: Pubkey,
+    pub protocol_fee_rate: u32,
+    pub trade_fee_rate: u32,
+    pub tick_spacing: u16,
+    pub fund_fee_rate: u32,
+    pub fund_owner: Pubkey,
+}
+
+/// Raydium CLMM Create Personal Position Event (IDL `CreatePersonalPositionEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmCreatePersonalPositionEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub pool_state: Pubkey,
+    pub minter: Pubkey,
+    pub nft_owner: Pubkey,
+    pub tick_lower_index: i32,
+    pub tick_upper_index: i32,
+    pub liquidity: u128,
+    pub deposit_amount_0: u64,
+    pub deposit_amount_1: u64,
+    pub deposit_amount_0_transfer_fee: u64,
+    pub deposit_amount_1_transfer_fee: u64,
+}
+
+/// Raydium CLMM Liquidity Calculate Event (IDL `LiquidityCalculateEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmLiquidityCalculateEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub pool_liquidity: u128,
+    pub pool_sqrt_price_x64: u128,
+    pub pool_tick: i32,
+    pub calc_amount_0: u64,
+    pub calc_amount_1: u64,
+    pub trade_fee_owed_0: u64,
+    pub trade_fee_owed_1: u64,
+    pub transfer_fee_0: u64,
+    pub transfer_fee_1: u64,
+}
+
+/// Raydium CLMM Open Limit Order Event (IDL `OpenLimitOrderEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmOpenLimitOrderEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub pool_id: Pubkey,
+    pub limit_order: Pubkey,
+    pub zero_for_one: bool,
+    pub tick_index: i32,
+    pub total_amount: u64,
+    pub transfer_fee: u64,
+}
+
+/// Raydium CLMM Increase Limit Order Event (IDL `IncreaseLimitOrderEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmIncreaseLimitOrderEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub pool_id: Pubkey,
+    pub limit_order: Pubkey,
+    pub zero_for_one: bool,
+    pub tick_index: i32,
+    pub total_amount: u64,
+    pub increased_amount: u64,
+    pub transfer_fee: u64,
+}
+
+/// Raydium CLMM Decrease Limit Order Event (IDL `DecreaseLimitOrderEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmDecreaseLimitOrderEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub pool_id: Pubkey,
+    pub limit_order: Pubkey,
+    pub zero_for_one: bool,
+    pub tick_index: i32,
+    pub total_amount: u64,
+    pub filled_amount: u64,
+    pub settled_output_amount: u64,
+    pub decreased_amount: u64,
+}
+
+/// Raydium CLMM Settle Limit Order Event (IDL `SettleLimitOrderEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmSettleLimitOrderEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub pool_id: Pubkey,
+    pub limit_order: Pubkey,
+    pub zero_for_one: bool,
+    pub tick_index: i32,
+    pub total_amount: u64,
+    pub filled_amount: u64,
+    pub settled_amount_out: u64,
+}
+
+/// Raydium CLMM Update Reward Infos Event (IDL `UpdateRewardInfosEvent`)
+#[cfg_attr(feature = "parse-borsh", derive(BorshDeserialize))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmUpdateRewardInfosEvent {
+    #[cfg_attr(feature = "parse-borsh", borsh(skip))]
+    pub metadata: EventMetadata,
+    pub reward_growth_global_x64: [u128; 3],
 }
 
 /// Raydium CLMM Open Position with Token Extension NFT Event
@@ -1652,7 +1787,9 @@ pub struct RaydiumClmmAmmConfig {
     pub trade_fee_rate: u32,
     pub tick_spacing: u16,
     pub fund_fee_rate: u32,
+    pub padding_u32: u32,
     pub fund_owner: Pubkey,
+    pub padding: [u64; 3],
 }
 
 /// Raydium CLMM Pool State Account Event
@@ -1668,17 +1805,67 @@ pub struct RaydiumClmmPoolState {
     pub bump: [u8; 1],
     pub amm_config: Pubkey,
     pub owner: Pubkey,
-    pub token_mint0: Pubkey,
-    pub token_mint1: Pubkey,
-    pub token_vault0: Pubkey,
-    pub token_vault1: Pubkey,
+    pub token_mint_0: Pubkey,
+    pub token_mint_1: Pubkey,
+    pub token_vault_0: Pubkey,
+    pub token_vault_1: Pubkey,
     pub observation_key: Pubkey,
-    pub mint_decimals0: u8,
-    pub mint_decimals1: u8,
+    pub mint_decimals_0: u8,
+    pub mint_decimals_1: u8,
     pub tick_spacing: u16,
     pub liquidity: u128,
     pub sqrt_price_x64: u128,
     pub tick_current: i32,
+    pub padding3: u16,
+    pub padding4: u16,
+    pub fee_growth_global_0_x64: u128,
+    pub fee_growth_global_1_x64: u128,
+    pub protocol_fees_token_0: u64,
+    pub protocol_fees_token_1: u64,
+    pub padding5: [u128; 4],
+    pub status: u8,
+    pub fee_on: u8,
+    pub padding: [u8; 6],
+    pub reward_infos: [RaydiumClmmRewardInfo; 3],
+    pub tick_array_bitmap: [u64; 16],
+    pub padding6: [u64; 4],
+    pub fund_fees_token_0: u64,
+    pub fund_fees_token_1: u64,
+    pub open_time: u64,
+    pub recent_epoch: u64,
+    pub dynamic_fee_info: RaydiumClmmDynamicFeeInfo,
+    pub padding1: [u64; 14],
+    pub padding2: [u64; 32],
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmRewardInfo {
+    pub reward_state: u8,
+    pub open_time: u64,
+    pub end_time: u64,
+    pub last_update_time: u64,
+    pub emissions_per_second_x64: u128,
+    pub reward_total_emitted: u64,
+    pub reward_claimed: u64,
+    pub token_mint: Pubkey,
+    pub token_vault: Pubkey,
+    pub authority: Pubkey,
+    pub reward_growth_global_x64: u128,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaydiumClmmDynamicFeeInfo {
+    pub filter_period: u16,
+    pub decay_period: u16,
+    pub reduction_factor: u16,
+    pub dynamic_fee_control: u32,
+    pub max_volatility_accumulator: u32,
+    pub tick_spacing_index_reference: i32,
+    pub volatility_reference: u32,
+    pub volatility_accumulator: u32,
+    pub last_update_timestamp: u64,
+    #[serde(with = "serde_big_array::BigArray")]
+    pub padding: [u8; 46],
 }
 
 /// Raydium CLMM Tick Array State Account Event
@@ -1691,11 +1878,13 @@ pub struct RaydiumClmmTickArrayStateAccountEvent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RaydiumClmmTickArrayState {
-    pub discriminator: u64,
     pub pool_id: Pubkey,
     pub start_tick_index: i32,
     pub ticks: Vec<Tick>,
     pub initialized_tick_count: u8,
+    pub recent_epoch: u64,
+    #[serde(with = "serde_big_array::BigArray")]
+    pub padding: [u8; 107],
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1706,6 +1895,11 @@ pub struct Tick {
     pub fee_growth_outside_0_x64: u128,
     pub fee_growth_outside_1_x64: u128,
     pub reward_growths_outside_x64: [u128; 3],
+    pub order_phase: u64,
+    pub orders_amount: u64,
+    pub part_filled_orders_remaining: u64,
+    pub unfilled_ratio_x64: u128,
+    pub padding: [u32; 3],
 }
 
 /// Raydium CPMM AMM Config Account Event

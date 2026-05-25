@@ -214,15 +214,34 @@ mod discriminators {
         u64::from_le_bytes([22, 9, 133, 26, 160, 44, 71, 192]);
 
     // Raydium CLMM discriminators
-    pub const RAYDIUM_CLMM_SWAP: u64 = u64::from_le_bytes([248, 198, 158, 145, 225, 117, 135, 200]);
+    pub const RAYDIUM_CLMM_SWAP: u64 = u64::from_le_bytes([64, 198, 205, 232, 38, 8, 113, 226]);
     pub const RAYDIUM_CLMM_INCREASE_LIQUIDITY: u64 =
-        u64::from_le_bytes([133, 29, 89, 223, 69, 238, 176, 10]);
+        u64::from_le_bytes([49, 79, 105, 212, 32, 34, 30, 84]);
     pub const RAYDIUM_CLMM_DECREASE_LIQUIDITY: u64 =
-        u64::from_le_bytes([160, 38, 208, 111, 104, 91, 44, 1]);
-    pub const RAYDIUM_CLMM_CREATE_POOL: u64 =
-        u64::from_le_bytes([233, 146, 209, 142, 207, 104, 64, 188]);
-    pub const RAYDIUM_CLMM_COLLECT_FEE: u64 =
-        u64::from_le_bytes([164, 152, 207, 99, 187, 104, 171, 119]);
+        u64::from_le_bytes([58, 222, 86, 58, 68, 50, 85, 56]);
+    pub const RAYDIUM_CLMM_LIQUIDITY_CHANGE: u64 =
+        u64::from_le_bytes([126, 240, 175, 206, 158, 88, 153, 107]);
+    pub const RAYDIUM_CLMM_CONFIG_CHANGE: u64 =
+        u64::from_le_bytes([247, 189, 7, 119, 106, 112, 95, 151]);
+    pub const RAYDIUM_CLMM_CREATE_PERSONAL_POSITION: u64 =
+        u64::from_le_bytes([100, 30, 87, 249, 196, 223, 154, 206]);
+    pub const RAYDIUM_CLMM_LIQUIDITY_CALCULATE: u64 =
+        u64::from_le_bytes([237, 112, 148, 230, 57, 84, 180, 162]);
+    pub const RAYDIUM_CLMM_OPEN_LIMIT_ORDER: u64 =
+        u64::from_le_bytes([106, 24, 71, 85, 57, 169, 158, 216]);
+    pub const RAYDIUM_CLMM_INCREASE_LIMIT_ORDER: u64 =
+        u64::from_le_bytes([11, 120, 13, 204, 199, 87, 19, 200]);
+    pub const RAYDIUM_CLMM_DECREASE_LIMIT_ORDER: u64 =
+        u64::from_le_bytes([70, 48, 40, 221, 219, 237, 212, 163]);
+    pub const RAYDIUM_CLMM_SETTLE_LIMIT_ORDER: u64 =
+        u64::from_le_bytes([88, 119, 77, 164, 125, 124, 10, 194]);
+    pub const RAYDIUM_CLMM_UPDATE_REWARD_INFOS: u64 =
+        u64::from_le_bytes([109, 127, 186, 78, 114, 65, 37, 236]);
+    pub const RAYDIUM_CLMM_CREATE_POOL: u64 = u64::from_le_bytes([25, 94, 75, 47, 112, 99, 53, 63]);
+    pub const RAYDIUM_CLMM_COLLECT_PERSONAL_FEE: u64 =
+        u64::from_le_bytes([166, 174, 105, 192, 81, 161, 83, 105]);
+    pub const RAYDIUM_CLMM_COLLECT_PROTOCOL_FEE: u64 =
+        u64::from_le_bytes([206, 87, 17, 79, 45, 41, 213, 61]);
 
     // Raydium CPMM discriminators
     pub const RAYDIUM_CPMM_SWAP_BASE_IN: u64 =
@@ -428,11 +447,6 @@ fn unscoped_filter_allows_discriminator(discriminator: u64, filter: &EventTypeFi
         discriminators::PUMPFUN_TRADE => {
             filter.should_include(EventType::PumpFunTrade)
                 || filter.should_include(EventType::BonkTrade)
-        }
-        // Shared by Raydium CLMM create-pool and Raydium CPMM initialize.
-        discriminators::RAYDIUM_CLMM_CREATE_POOL => {
-            filter.should_include(EventType::RaydiumClmmCreatePool)
-                || filter.should_include(EventType::RaydiumCpmmInitialize)
         }
         // Shared by Raydium CPMM swap-base-in and Meteora DLMM swap.
         discriminators::RAYDIUM_CPMM_SWAP_BASE_IN => {
@@ -678,11 +692,41 @@ fn parse_log_optimized_inner(
         discriminators::RAYDIUM_CLMM_DECREASE_LIQUIDITY => {
             crate::logs::raydium_clmm::parse_decrease_liquidity_from_data(data, metadata)
         }
+        discriminators::RAYDIUM_CLMM_LIQUIDITY_CHANGE => {
+            crate::logs::raydium_clmm::parse_liquidity_change_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_CONFIG_CHANGE => {
+            crate::logs::raydium_clmm::parse_config_change_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_CREATE_PERSONAL_POSITION => {
+            crate::logs::raydium_clmm::parse_create_personal_position_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_LIQUIDITY_CALCULATE => {
+            crate::logs::raydium_clmm::parse_liquidity_calculate_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_OPEN_LIMIT_ORDER => {
+            crate::logs::raydium_clmm::parse_open_limit_order_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_INCREASE_LIMIT_ORDER => {
+            crate::logs::raydium_clmm::parse_increase_limit_order_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_DECREASE_LIMIT_ORDER => {
+            crate::logs::raydium_clmm::parse_decrease_limit_order_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_SETTLE_LIMIT_ORDER => {
+            crate::logs::raydium_clmm::parse_settle_limit_order_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_UPDATE_REWARD_INFOS => {
+            crate::logs::raydium_clmm::parse_update_reward_infos_from_data(data, metadata)
+        }
         discriminators::RAYDIUM_CLMM_CREATE_POOL => {
             crate::logs::raydium_clmm::parse_create_pool_from_data(data, metadata)
         }
-        discriminators::RAYDIUM_CLMM_COLLECT_FEE => {
-            crate::logs::raydium_clmm::parse_collect_fee_from_data(data, metadata)
+        discriminators::RAYDIUM_CLMM_COLLECT_PERSONAL_FEE => {
+            crate::logs::raydium_clmm::parse_collect_personal_fee_from_data(data, metadata)
+        }
+        discriminators::RAYDIUM_CLMM_COLLECT_PROTOCOL_FEE => {
+            crate::logs::raydium_clmm::parse_collect_protocol_fee_from_data(data, metadata)
         }
 
         // Raydium CPMM - use from_data functions (single decode)
@@ -856,8 +900,36 @@ fn program_scoped_discriminator_to_event_type(
             discriminators::RAYDIUM_CLMM_DECREASE_LIQUIDITY => {
                 Some(EventType::RaydiumClmmDecreaseLiquidity)
             }
+            discriminators::RAYDIUM_CLMM_LIQUIDITY_CHANGE => {
+                Some(EventType::RaydiumClmmLiquidityChange)
+            }
+            discriminators::RAYDIUM_CLMM_CONFIG_CHANGE => Some(EventType::RaydiumClmmConfigChange),
+            discriminators::RAYDIUM_CLMM_CREATE_PERSONAL_POSITION => {
+                Some(EventType::RaydiumClmmCreatePersonalPosition)
+            }
+            discriminators::RAYDIUM_CLMM_LIQUIDITY_CALCULATE => {
+                Some(EventType::RaydiumClmmLiquidityCalculate)
+            }
+            discriminators::RAYDIUM_CLMM_OPEN_LIMIT_ORDER => {
+                Some(EventType::RaydiumClmmOpenLimitOrder)
+            }
+            discriminators::RAYDIUM_CLMM_INCREASE_LIMIT_ORDER => {
+                Some(EventType::RaydiumClmmIncreaseLimitOrder)
+            }
+            discriminators::RAYDIUM_CLMM_DECREASE_LIMIT_ORDER => {
+                Some(EventType::RaydiumClmmDecreaseLimitOrder)
+            }
+            discriminators::RAYDIUM_CLMM_SETTLE_LIMIT_ORDER => {
+                Some(EventType::RaydiumClmmSettleLimitOrder)
+            }
+            discriminators::RAYDIUM_CLMM_UPDATE_REWARD_INFOS => {
+                Some(EventType::RaydiumClmmUpdateRewardInfos)
+            }
             discriminators::RAYDIUM_CLMM_CREATE_POOL => Some(EventType::RaydiumClmmCreatePool),
-            discriminators::RAYDIUM_CLMM_COLLECT_FEE => Some(EventType::RaydiumClmmCollectFee),
+            discriminators::RAYDIUM_CLMM_COLLECT_PERSONAL_FEE
+            | discriminators::RAYDIUM_CLMM_COLLECT_PROTOCOL_FEE => {
+                Some(EventType::RaydiumClmmCollectFee)
+            }
             _ => None,
         },
         program_ids::RAYDIUM_CPMM_PROGRAM_ID => match discriminator {
@@ -1094,11 +1166,43 @@ fn parse_program_scoped_event(
                 discriminators::RAYDIUM_CLMM_DECREASE_LIQUIDITY => {
                     crate::logs::raydium_clmm::parse_decrease_liquidity_from_data(data, metadata)
                 }
+                discriminators::RAYDIUM_CLMM_LIQUIDITY_CHANGE => {
+                    crate::logs::raydium_clmm::parse_liquidity_change_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_CONFIG_CHANGE => {
+                    crate::logs::raydium_clmm::parse_config_change_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_CREATE_PERSONAL_POSITION => {
+                    crate::logs::raydium_clmm::parse_create_personal_position_from_data(
+                        data, metadata,
+                    )
+                }
+                discriminators::RAYDIUM_CLMM_LIQUIDITY_CALCULATE => {
+                    crate::logs::raydium_clmm::parse_liquidity_calculate_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_OPEN_LIMIT_ORDER => {
+                    crate::logs::raydium_clmm::parse_open_limit_order_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_INCREASE_LIMIT_ORDER => {
+                    crate::logs::raydium_clmm::parse_increase_limit_order_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_DECREASE_LIMIT_ORDER => {
+                    crate::logs::raydium_clmm::parse_decrease_limit_order_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_SETTLE_LIMIT_ORDER => {
+                    crate::logs::raydium_clmm::parse_settle_limit_order_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_UPDATE_REWARD_INFOS => {
+                    crate::logs::raydium_clmm::parse_update_reward_infos_from_data(data, metadata)
+                }
                 discriminators::RAYDIUM_CLMM_CREATE_POOL => {
                     crate::logs::raydium_clmm::parse_create_pool_from_data(data, metadata)
                 }
-                discriminators::RAYDIUM_CLMM_COLLECT_FEE => {
-                    crate::logs::raydium_clmm::parse_collect_fee_from_data(data, metadata)
+                discriminators::RAYDIUM_CLMM_COLLECT_PERSONAL_FEE => {
+                    crate::logs::raydium_clmm::parse_collect_personal_fee_from_data(data, metadata)
+                }
+                discriminators::RAYDIUM_CLMM_COLLECT_PROTOCOL_FEE => {
+                    crate::logs::raydium_clmm::parse_collect_protocol_fee_from_data(data, metadata)
                 }
                 _ => None,
             }
@@ -1358,8 +1462,34 @@ fn discriminator_to_event_type(discriminator: u64) -> Option<EventType> {
         discriminators::RAYDIUM_CLMM_DECREASE_LIQUIDITY => {
             Some(EventType::RaydiumClmmDecreaseLiquidity)
         }
+        discriminators::RAYDIUM_CLMM_LIQUIDITY_CHANGE => {
+            Some(EventType::RaydiumClmmLiquidityChange)
+        }
+        discriminators::RAYDIUM_CLMM_CONFIG_CHANGE => Some(EventType::RaydiumClmmConfigChange),
+        discriminators::RAYDIUM_CLMM_CREATE_PERSONAL_POSITION => {
+            Some(EventType::RaydiumClmmCreatePersonalPosition)
+        }
+        discriminators::RAYDIUM_CLMM_LIQUIDITY_CALCULATE => {
+            Some(EventType::RaydiumClmmLiquidityCalculate)
+        }
+        discriminators::RAYDIUM_CLMM_OPEN_LIMIT_ORDER => Some(EventType::RaydiumClmmOpenLimitOrder),
+        discriminators::RAYDIUM_CLMM_INCREASE_LIMIT_ORDER => {
+            Some(EventType::RaydiumClmmIncreaseLimitOrder)
+        }
+        discriminators::RAYDIUM_CLMM_DECREASE_LIMIT_ORDER => {
+            Some(EventType::RaydiumClmmDecreaseLimitOrder)
+        }
+        discriminators::RAYDIUM_CLMM_SETTLE_LIMIT_ORDER => {
+            Some(EventType::RaydiumClmmSettleLimitOrder)
+        }
+        discriminators::RAYDIUM_CLMM_UPDATE_REWARD_INFOS => {
+            Some(EventType::RaydiumClmmUpdateRewardInfos)
+        }
         discriminators::RAYDIUM_CLMM_CREATE_POOL => Some(EventType::RaydiumClmmCreatePool),
-        discriminators::RAYDIUM_CLMM_COLLECT_FEE => Some(EventType::RaydiumClmmCollectFee),
+        discriminators::RAYDIUM_CLMM_COLLECT_PERSONAL_FEE
+        | discriminators::RAYDIUM_CLMM_COLLECT_PROTOCOL_FEE => {
+            Some(EventType::RaydiumClmmCollectFee)
+        }
         discriminators::RAYDIUM_CPMM_SWAP_BASE_IN | discriminators::RAYDIUM_CPMM_SWAP_BASE_OUT => {
             Some(EventType::RaydiumCpmmSwap)
         }

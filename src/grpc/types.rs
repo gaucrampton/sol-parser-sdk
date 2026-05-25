@@ -291,6 +291,15 @@ pub enum EventType {
     RaydiumClmmClosePosition,
     RaydiumClmmIncreaseLiquidity,
     RaydiumClmmDecreaseLiquidity,
+    RaydiumClmmLiquidityChange,
+    RaydiumClmmConfigChange,
+    RaydiumClmmCreatePersonalPosition,
+    RaydiumClmmLiquidityCalculate,
+    RaydiumClmmOpenLimitOrder,
+    RaydiumClmmIncreaseLimitOrder,
+    RaydiumClmmDecreaseLimitOrder,
+    RaydiumClmmSettleLimitOrder,
+    RaydiumClmmUpdateRewardInfos,
     RaydiumClmmOpenPositionWithTokenExtNft,
     RaydiumClmmCollectFee,
 
@@ -545,6 +554,15 @@ impl EventTypeFilter {
                     | EventType::RaydiumClmmClosePosition
                     | EventType::RaydiumClmmIncreaseLiquidity
                     | EventType::RaydiumClmmDecreaseLiquidity
+                    | EventType::RaydiumClmmLiquidityChange
+                    | EventType::RaydiumClmmConfigChange
+                    | EventType::RaydiumClmmCreatePersonalPosition
+                    | EventType::RaydiumClmmLiquidityCalculate
+                    | EventType::RaydiumClmmOpenLimitOrder
+                    | EventType::RaydiumClmmIncreaseLimitOrder
+                    | EventType::RaydiumClmmDecreaseLimitOrder
+                    | EventType::RaydiumClmmSettleLimitOrder
+                    | EventType::RaydiumClmmUpdateRewardInfos
                     | EventType::RaydiumClmmOpenPositionWithTokenExtNft
                     | EventType::RaydiumClmmCollectFee
             )
@@ -675,6 +693,23 @@ pub fn event_type_from_dex_event(event: &crate::core::events::DexEvent) -> Optio
         DexEvent::RaydiumClmmClosePosition(_) => Some(EventType::RaydiumClmmClosePosition),
         DexEvent::RaydiumClmmIncreaseLiquidity(_) => Some(EventType::RaydiumClmmIncreaseLiquidity),
         DexEvent::RaydiumClmmDecreaseLiquidity(_) => Some(EventType::RaydiumClmmDecreaseLiquidity),
+        DexEvent::RaydiumClmmLiquidityChange(_) => Some(EventType::RaydiumClmmLiquidityChange),
+        DexEvent::RaydiumClmmConfigChange(_) => Some(EventType::RaydiumClmmConfigChange),
+        DexEvent::RaydiumClmmCreatePersonalPosition(_) => {
+            Some(EventType::RaydiumClmmCreatePersonalPosition)
+        }
+        DexEvent::RaydiumClmmLiquidityCalculate(_) => {
+            Some(EventType::RaydiumClmmLiquidityCalculate)
+        }
+        DexEvent::RaydiumClmmOpenLimitOrder(_) => Some(EventType::RaydiumClmmOpenLimitOrder),
+        DexEvent::RaydiumClmmIncreaseLimitOrder(_) => {
+            Some(EventType::RaydiumClmmIncreaseLimitOrder)
+        }
+        DexEvent::RaydiumClmmDecreaseLimitOrder(_) => {
+            Some(EventType::RaydiumClmmDecreaseLimitOrder)
+        }
+        DexEvent::RaydiumClmmSettleLimitOrder(_) => Some(EventType::RaydiumClmmSettleLimitOrder),
+        DexEvent::RaydiumClmmUpdateRewardInfos(_) => Some(EventType::RaydiumClmmUpdateRewardInfos),
         DexEvent::RaydiumClmmCollectFee(_) => Some(EventType::RaydiumClmmCollectFee),
         DexEvent::RaydiumCpmmSwap(_) => Some(EventType::RaydiumCpmmSwap),
         DexEvent::RaydiumCpmmDeposit(_) => Some(EventType::RaydiumCpmmDeposit),

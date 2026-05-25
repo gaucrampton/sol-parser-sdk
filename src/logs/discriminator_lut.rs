@@ -155,13 +155,84 @@ fn parse_raydium_clmm_decrease_liquidity(data: &[u8], metadata: EventMetadata) -
 }
 
 #[inline(always)]
+fn parse_raydium_clmm_liquidity_change(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_liquidity_change_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_config_change(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_config_change_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_create_personal_position(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_create_personal_position_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_liquidity_calculate(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_liquidity_calculate_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_open_limit_order(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_open_limit_order_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_increase_limit_order(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_increase_limit_order_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_decrease_limit_order(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_decrease_limit_order_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_settle_limit_order(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_settle_limit_order_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_update_reward_infos(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_update_reward_infos_from_data(data, metadata)
+}
+
+#[inline(always)]
 fn parse_raydium_clmm_create_pool(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
     crate::logs::raydium_clmm::parse_create_pool_from_data(data, metadata)
 }
 
 #[inline(always)]
-fn parse_raydium_clmm_collect_fee(data: &[u8], metadata: EventMetadata) -> Option<DexEvent> {
-    crate::logs::raydium_clmm::parse_collect_fee_from_data(data, metadata)
+fn parse_raydium_clmm_collect_personal_fee(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_collect_personal_fee_from_data(data, metadata)
+}
+
+#[inline(always)]
+fn parse_raydium_clmm_collect_protocol_fee(
+    data: &[u8],
+    metadata: EventMetadata,
+) -> Option<DexEvent> {
+    crate::logs::raydium_clmm::parse_collect_protocol_fee_from_data(data, metadata)
 }
 
 // Raydium CPMM parsers
@@ -291,12 +362,6 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::RaydiumAmm
     ),
     disc_entry!(
-        0x012C5B686FD026A0,
-        "Raydium CLMM Decrease Liquidity",
-        parse_raydium_clmm_decrease_liquidity,
-        Protocol::RaydiumClmm
-    ),
-    disc_entry!(
         0x0300000000000000,
         "Raydium AMM Deposit",
         parse_raydium_amm_deposit,
@@ -321,12 +386,6 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::RaydiumAmm
     ),
     disc_entry!(
-        0x0AB0EE45DF591D85,
-        "Raydium CLMM Increase Liquidity",
-        parse_raydium_clmm_increase_liquidity,
-        Protocol::RaydiumClmm
-    ),
-    disc_entry!(
         0xABB5CA7047241A6,
         "Orca Whirlpool Liquidity Decreased",
         parse_orca_liquidity_decreased,
@@ -347,6 +406,12 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
     ),
     // PumpSwap events
     disc_entry!(0x2ADC03A50A372F3E, "PumpSwap Sell", parse_pumpswap_sell, Protocol::PumpSwap),
+    disc_entry!(
+        0x385532443A56DE3A,
+        "Raydium CLMM Decrease Liquidity",
+        parse_raydium_clmm_decrease_liquidity,
+        Protocol::RaydiumClmm
+    ),
     // Meteora AMM events
     disc_entry!(
         0x3A981F67E861F474,
@@ -355,10 +420,22 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::MeteoraAmm
     ),
     disc_entry!(
+        0x3DD5292D4F1157CE,
+        "Raydium CLMM Collect Protocol Fee",
+        parse_raydium_clmm_collect_protocol_fee,
+        Protocol::RaydiumClmm
+    ),
+    disc_entry!(
         0x3E99BE0E3C651772_u64,
         "Pump Fees Revoke Fee Sharing Authority",
         parse_pumpfees_revoke,
         Protocol::PumpFees
+    ),
+    disc_entry!(
+        0x3F3563702F4B5E19,
+        "Raydium CLMM Create Pool",
+        parse_raydium_clmm_create_pool,
+        Protocol::RaydiumClmm
     ),
     disc_entry!(
         0x529DDC6858292CCA,
@@ -367,10 +444,28 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::MeteoraAmm
     ),
     disc_entry!(
+        0x541E2220D4694F31,
+        "Raydium CLMM Increase Liquidity",
+        parse_raydium_clmm_increase_liquidity,
+        Protocol::RaydiumClmm
+    ),
+    disc_entry!(
         0x58FB74B8C8AA6985_u64,
         "Pump Fees Create Fee Sharing Config",
         parse_pumpfun_create_fee_sharing_config,
         Protocol::PumpFees
+    ),
+    disc_entry!(
+        0x6953A151C069AEA6,
+        "Raydium CLMM Collect Personal Fee",
+        parse_raydium_clmm_collect_personal_fee,
+        Protocol::RaydiumClmm
+    ),
+    disc_entry!(
+        0x6B99589ECEAFF07E,
+        "Raydium CLMM Liquidity Change",
+        parse_raydium_clmm_liquidity_change,
+        Protocol::RaydiumClmm
     ),
     // PumpSwap and PumpFun events
     disc_entry!(
@@ -381,12 +476,6 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
     ),
     disc_entry!(0x7663EBDE4DA91B1B, "PumpFun Create", parse_pumpfun_create, Protocol::PumpFun),
     disc_entry!(0x7777F52C1F52F467, "PumpSwap Buy", parse_pumpswap_buy, Protocol::PumpSwap),
-    disc_entry!(
-        0x77AB68BB63CF98A4,
-        "Raydium CLMM Collect Fee",
-        parse_raydium_clmm_collect_fee,
-        Protocol::RaydiumClmm
-    ),
     disc_entry!(
         0x7EE2380AE6F48A59_u64,
         "Pump Fees Initialize Fee Config",
@@ -407,10 +496,28 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::OrcaWhirlpool
     ),
     disc_entry!(
+        0x975F706A7707BDF7,
+        "Raydium CLMM Config Change",
+        parse_raydium_clmm_config_change,
+        Protocol::RaydiumClmm
+    ),
+    disc_entry!(
         0xA19BFE6690071E1E,
         "Orca Whirlpool Liquidity Increased",
         parse_orca_liquidity_increased,
         Protocol::OrcaWhirlpool
+    ),
+    disc_entry!(
+        0xA2B45439E69470ED,
+        "Raydium CLMM Liquidity Calculate",
+        parse_raydium_clmm_liquidity_calculate,
+        Protocol::RaydiumClmm
+    ),
+    disc_entry!(
+        0xA3D4EDDBDD283046,
+        "Raydium CLMM Decrease Limit Order",
+        parse_raydium_clmm_decrease_limit_order,
+        Protocol::RaydiumClmm
     ),
     disc_entry!(
         0xADB44AA35662D937,
@@ -431,16 +538,16 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::MeteoraAmm
     ),
     disc_entry!(
-        0xBC4068CF8ED192E9,
-        "Raydium CLMM Create Pool",
-        parse_raydium_clmm_create_pool,
-        Protocol::RaydiumClmm
-    ),
-    disc_entry!(
         0xC0472CA01A850916,
         "PumpSwap Remove Liquidity",
         parse_pumpswap_remove_liquidity,
         Protocol::PumpSwap
+    ),
+    disc_entry!(
+        0xC20A7C7DA44D7758,
+        "Raydium CLMM Settle Limit Order",
+        parse_raydium_clmm_settle_limit_order,
+        Protocol::RaydiumClmm
     ),
     disc_entry!(
         0xC40AD0CDBE6CE351,
@@ -449,9 +556,9 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::MeteoraAmm
     ),
     disc_entry!(
-        0xC887759EE19EC6F8,
-        "Raydium CLMM Swap",
-        parse_raydium_clmm_swap,
+        0xC81357C7CC0D780B,
+        "Raydium CLMM Increase Limit Order",
+        parse_raydium_clmm_increase_limit_order,
         Protocol::RaydiumClmm
     ),
     disc_entry!(
@@ -467,16 +574,34 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         Protocol::PumpFees
     ),
     disc_entry!(
+        0xCE9ADFC4F9571E64,
+        "Raydium CLMM Create Personal Position",
+        parse_raydium_clmm_create_personal_position,
+        Protocol::RaydiumClmm
+    ),
+    disc_entry!(
         0xD0BCF43E2341175A_u64,
         "Pump Fees Update Fee Config",
         parse_pumpfees_update_fee_config,
         Protocol::PumpFees
     ),
     disc_entry!(
+        0xD89EA9395547186A,
+        "Raydium CLMM Open Limit Order",
+        parse_raydium_clmm_open_limit_order,
+        Protocol::RaydiumClmm
+    ),
+    disc_entry!(
         0xDE331EC4DA5ABE8F,
         "Raydium CPMM Swap Base In",
         parse_raydium_cpmm_swap_base_in,
         Protocol::RaydiumCpmm
+    ),
+    disc_entry!(
+        0xE2710826E8CDC640,
+        "Raydium CLMM Swap",
+        parse_raydium_clmm_swap,
+        Protocol::RaydiumClmm
     ),
     disc_entry!(
         0xE5FEC60C57AD7664,
@@ -495,6 +620,12 @@ pub const DISCRIMINATOR_LUT: &[DiscriminatorInfo] = &[
         "Pump Fees Transfer Fee Sharing Authority",
         parse_pumpfees_transfer,
         Protocol::PumpFees
+    ),
+    disc_entry!(
+        0xEC2541724EBA7F6D,
+        "Raydium CLMM Update Reward Infos",
+        parse_raydium_clmm_update_reward_infos,
+        Protocol::RaydiumClmm
     ),
     disc_entry!(0xEE61E64ED37FDBBD, "PumpFun Trade", parse_pumpfun_trade, Protocol::PumpFun),
     disc_entry!(
@@ -572,7 +703,7 @@ mod tests {
         assert_eq!(info.protocol, Protocol::PumpFun);
 
         // Raydium CLMM Swap
-        let disc = 0xC887759EE19EC6F8;
+        let disc = 0xE2710826E8CDC640;
         let info = lookup_discriminator(disc).unwrap();
         assert_eq!(info.name, "Raydium CLMM Swap");
         assert_eq!(info.protocol, Protocol::RaydiumClmm);
@@ -596,7 +727,7 @@ mod tests {
     #[test]
     fn test_protocol_lookup() {
         assert_eq!(discriminator_to_protocol(0x7663EBDE4DA91B1B), Some(Protocol::PumpFun));
-        assert_eq!(discriminator_to_protocol(0xC887759EE19EC6F8), Some(Protocol::RaydiumClmm));
+        assert_eq!(discriminator_to_protocol(0xE2710826E8CDC640), Some(Protocol::RaydiumClmm));
         assert_eq!(discriminator_to_protocol(0x96A02B93AF49CAE1), Some(Protocol::OrcaWhirlpool));
     }
 }
