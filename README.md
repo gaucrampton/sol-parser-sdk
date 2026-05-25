@@ -108,13 +108,13 @@ sol-parser-sdk = { path = "../sol-parser-sdk", default-features = false, feature
 
 ```toml
 # Add to your Cargo.toml
-sol-parser-sdk = "0.5.0"
+sol-parser-sdk = "0.5.1"
 ```
 
 Or with the zero-copy parser (maximum performance):
 
 ```toml
-sol-parser-sdk = { version = "0.5.0", default-features = false, features = ["parse-zero-copy"] }
+sol-parser-sdk = { version = "0.5.1", default-features = false, features = ["parse-zero-copy"] }
 ```
 
 ### Performance Testing
@@ -299,8 +299,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **ShredStream Limitations:**
-- Only `static_account_keys()` - transactions using ALT may have incorrect accounts
-- No Inner Instructions - cannot parse CPI calls
+- Only `static_account_keys()` - ALT-loaded instruction accounts use default placeholders, while outer instructions are parsed best-effort from data/discriminators
+- No Inner Instructions - CPI/inner-only events cannot be recovered from ShredStream entries
 - No block_time - always 0
 - tx_index is entry-level, not slot-level
 

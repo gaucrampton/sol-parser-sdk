@@ -4,6 +4,7 @@
 //! 本模块仍依赖其 bincode 布局解码 Shred 侧 `entries` 负载。
 #![allow(deprecated)]
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,6 +21,21 @@ use crate::grpc::types::EventTypeFilter;
 use crate::shredstream::config::ShredStreamConfig;
 use crate::shredstream::proto::{Entry, ShredstreamProxyClient, SubscribeEntriesRequest};
 use crate::DexEvent;
+
+static SHREDSTREAM_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
+
+#[inline]
+fn record_shredstream_dropped_event() -> u64 {
+    let dropped = SHREDSTREAM_DROPPED_EVENTS.fetch_add(1, Ordering::Relaxed) + 1;
+    if dropped <= 10 || dropped.is_power_of_two() {
+        log::warn!(
+            target: "sol_parser_sdk::shredstream",
+            "ShredStream event queue is full; dropped event count={}",
+            dropped
+        );
+    }
+    dropped
+}
 
 /// ShredStream 客户端
 #[derive(Clone)]
@@ -229,7 +245,7 @@ impl ShredStreamClient {
             if !m.address_table_lookups.is_empty() {
                 log::trace!(
                     target: "sol_parser_sdk::shredstream",
-                    "V0 tx uses address lookup tables; shred parser will parse only instructions whose accounts are fully static"
+                    "V0 tx uses address lookup tables; shred parser will use static accounts and default placeholders for ALT-loaded accounts"
                 );
             }
         }
@@ -249,7 +265,40 @@ impl ShredStreamClient {
             if let Some(meta) = event.metadata_mut() {
                 meta.grpc_recv_us = recv_us;
             }
-            let _ = queue.push(event);
+            if queue.push(event).is_err() {
+                record_shredstream_dropped_event();
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::events::{EventMetadata, PumpFunCreateTokenEvent};
+
+    #[test]
+    fn dropped_counter_increments_without_panicking() {
+        let before = SHREDSTREAM_DROPPED_EVENTS.load(Ordering::Relaxed);
+        let queue = ArrayQueue::new(1);
+
+        queue
+            .push(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+                metadata: EventMetadata::default(),
+                ..Default::default()
+            }))
+            .expect("first push fits");
+
+        if queue
+            .push(DexEvent::PumpFunCreate(PumpFunCreateTokenEvent {
+                metadata: EventMetadata::default(),
+                ..Default::default()
+            }))
+            .is_err()
+        {
+            record_shredstream_dropped_event();
+        }
+
+        assert!(SHREDSTREAM_DROPPED_EVENTS.load(Ordering::Relaxed) >= before + 1);
     }
 }

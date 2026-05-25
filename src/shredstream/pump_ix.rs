@@ -27,8 +27,212 @@ use crate::instr::pump::PROGRAM_ID_PUBKEY;
 use crate::instr::utils::{
     read_bool, read_option_bool_idl, read_pubkey, read_str_unchecked, read_u64_le,
 };
+use crate::instr::{
+    meteora_amm, meteora_damm, orca_whirlpool, pump_amm, pump_fees, raydium_amm, raydium_clmm,
+    raydium_cpmm, raydium_launchpad,
+};
 
 type PumpMintSet = SmallVec<[Pubkey; 4]>;
+type ShredIxAccounts = SmallVec<[Pubkey; 64]>;
+
+#[inline(always)]
+fn account_from_static_or_default(static_keys: &[Pubkey], idx: u8) -> Pubkey {
+    static_keys.get(idx as usize).copied().unwrap_or_default()
+}
+
+#[inline(always)]
+fn program_id_references_loaded_key(program_id_index: u8, static_key_len: usize) -> bool {
+    program_id_index as usize >= static_key_len
+}
+
+#[inline(always)]
+fn supported_unified_outer_programs() -> &'static [Pubkey] {
+    &[
+        PUMPSWAP_PROGRAM_ID,
+        PUMP_FEES_PROGRAM_ID,
+        BONK_PROGRAM_ID,
+        RAYDIUM_CPMM_PROGRAM_ID,
+        RAYDIUM_CLMM_PROGRAM_ID,
+        RAYDIUM_AMM_V4_PROGRAM_ID,
+        ORCA_WHIRLPOOL_PROGRAM_ID,
+        METEORA_POOLS_PROGRAM_ID,
+        METEORA_DAMM_V2_PROGRAM_ID,
+        METEORA_DLMM_PROGRAM_ID,
+    ]
+}
+
+#[inline(always)]
+fn build_shred_ix_accounts(static_keys: &[Pubkey], ix_accounts: &[u8]) -> ShredIxAccounts {
+    let mut accounts = SmallVec::with_capacity(ix_accounts.len());
+    for &idx in ix_accounts {
+        accounts.push(account_from_static_or_default(static_keys, idx));
+    }
+    accounts
+}
+
+#[inline(always)]
+fn disc8(data: &[u8]) -> Option<[u8; 8]> {
+    data.get(..8)?.try_into().ok()
+}
+
+#[inline(always)]
+fn pumpfun_outer_data_may_parse(data: &[u8]) -> bool {
+    let Some(disc) = disc8(data) else {
+        return false;
+    };
+    matches!(
+        disc,
+        discriminators::CREATE
+            | discriminators::CREATE_V2
+            | discriminators::BUY
+            | discriminators::SELL
+            | discriminators::BUY_EXACT_SOL_IN
+            | discriminators::BUY_V2
+            | discriminators::BUY_EXACT_QUOTE_IN_V2
+            | discriminators::SELL_V2
+            | discriminators::MIGRATE_BONDING_CURVE_CREATOR
+    )
+}
+
+#[inline(always)]
+fn unified_outer_data_may_parse(program_id: Pubkey, data: &[u8]) -> bool {
+    if program_id == PUMPSWAP_PROGRAM_ID {
+        let Some(disc) = disc8(data) else {
+            return false;
+        };
+        matches!(
+            disc,
+            pump_amm::discriminators::BUY
+                | pump_amm::discriminators::BUY_EXACT_QUOTE_IN
+                | pump_amm::discriminators::SELL
+                | pump_amm::discriminators::CREATE_POOL
+                | pump_amm::discriminators::DEPOSIT
+                | pump_amm::discriminators::WITHDRAW
+        )
+    } else if program_id == PUMP_FEES_PROGRAM_ID {
+        let Some(disc) = disc8(data) else {
+            return false;
+        };
+        matches!(
+            disc,
+            pump_fees::CREATE_FEE_SHARING_IX
+                | pump_fees::INITIALIZE_FEE_CONFIG_IX
+                | pump_fees::RESET_FEE_SHARING_IX
+                | pump_fees::RESET_FEE_SHARING_V2_IX
+                | pump_fees::REVOKE_FEE_SHARING_IX
+                | pump_fees::TRANSFER_FEE_SHARING_IX
+                | pump_fees::UPDATE_ADMIN_IX
+                | pump_fees::UPDATE_FEE_CONFIG_IX
+                | pump_fees::UPDATE_FEE_SHARES_IX
+                | pump_fees::UPDATE_FEE_SHARES_V2_IX
+                | pump_fees::UPSERT_FEE_TIERS_IX
+        )
+    } else if program_id == BONK_PROGRAM_ID {
+        let Some(disc) = disc8(data) else {
+            return false;
+        };
+        matches!(
+            disc,
+            raydium_launchpad::discriminators::BUY_EXACT_IN
+                | raydium_launchpad::discriminators::BUY_EXACT_OUT
+                | raydium_launchpad::discriminators::SELL_EXACT_IN
+                | raydium_launchpad::discriminators::SELL_EXACT_OUT
+                | raydium_launchpad::discriminators::INITIALIZE
+                | raydium_launchpad::discriminators::INITIALIZE_V2
+                | raydium_launchpad::discriminators::INITIALIZE_WITH_TOKEN_2022
+        )
+    } else if program_id == RAYDIUM_CPMM_PROGRAM_ID {
+        let Some(disc) = disc8(data) else {
+            return false;
+        };
+        matches!(
+            disc,
+            raydium_cpmm::discriminators::SWAP_BASE_IN
+                | raydium_cpmm::discriminators::SWAP_BASE_OUT
+                | raydium_cpmm::discriminators::INITIALIZE
+                | raydium_cpmm::discriminators::DEPOSIT
+                | raydium_cpmm::discriminators::WITHDRAW
+        )
+    } else if program_id == RAYDIUM_CLMM_PROGRAM_ID {
+        let Some(disc) = disc8(data) else {
+            return false;
+        };
+        matches!(
+            disc,
+            raydium_clmm::discriminators::SWAP
+                | raydium_clmm::discriminators::SWAP_V2
+                | raydium_clmm::discriminators::INCREASE_LIQUIDITY_V2
+                | raydium_clmm::discriminators::DECREASE_LIQUIDITY_V2
+                | raydium_clmm::discriminators::CREATE_POOL
+                | raydium_clmm::discriminators::CREATE_CUSTOMIZABLE_POOL
+                | raydium_clmm::discriminators::OPEN_POSITION
+                | raydium_clmm::discriminators::OPEN_POSITION_V2
+                | raydium_clmm::discriminators::OPEN_POSITION_WITH_TOKEN_22_NFT
+                | raydium_clmm::discriminators::CLOSE_POSITION
+        )
+    } else if program_id == RAYDIUM_AMM_V4_PROGRAM_ID {
+        matches!(
+            data.first().copied(),
+            Some(raydium_amm::discriminators::SWAP_BASE_IN)
+                | Some(raydium_amm::discriminators::SWAP_BASE_OUT)
+                | Some(raydium_amm::discriminators::DEPOSIT)
+                | Some(raydium_amm::discriminators::WITHDRAW)
+                | Some(raydium_amm::discriminators::INITIALIZE2)
+                | Some(raydium_amm::discriminators::WITHDRAW_PNL)
+        )
+    } else if program_id == ORCA_WHIRLPOOL_PROGRAM_ID {
+        let Some(disc) = disc8(data) else {
+            return false;
+        };
+        matches!(
+            disc,
+            orca_whirlpool::discriminators::SWAP
+                | orca_whirlpool::discriminators::SWAP_V2
+                | orca_whirlpool::discriminators::INCREASE_LIQUIDITY
+                | orca_whirlpool::discriminators::DECREASE_LIQUIDITY
+                | orca_whirlpool::discriminators::INITIALIZE_POOL
+        )
+    } else if program_id == METEORA_POOLS_PROGRAM_ID {
+        let Some(disc) = disc8(data) else {
+            return false;
+        };
+        matches!(
+            disc,
+            meteora_amm::discriminators::SWAP
+                | meteora_amm::discriminators::ADD_LIQUIDITY
+                | meteora_amm::discriminators::REMOVE_LIQUIDITY
+                | meteora_amm::discriminators::CREATE_POOL
+        )
+    } else if program_id == METEORA_DAMM_V2_PROGRAM_ID {
+        let Some(cpi_disc) = data.get(8..16).and_then(|bytes| bytes.try_into().ok()) else {
+            return false;
+        };
+        matches!(
+            cpi_disc,
+            meteora_damm::discriminators::SWAP_LOG
+                | meteora_damm::discriminators::SWAP2_LOG
+                | meteora_damm::discriminators::CREATE_POSITION_LOG
+                | meteora_damm::discriminators::CLOSE_POSITION_LOG
+                | meteora_damm::discriminators::ADD_LIQUIDITY_LOG
+                | meteora_damm::discriminators::REMOVE_LIQUIDITY_LOG
+        )
+    } else if program_id == METEORA_DLMM_PROGRAM_ID {
+        matches!(data.first().copied(), Some(0 | 1 | 2 | 7 | 8 | 11 | 13 | 14))
+    } else {
+        false
+    }
+}
+
+#[inline(always)]
+fn unknown_outer_data_may_parse(data: &[u8], filter: Option<&EventTypeFilter>) -> bool {
+    if filter.is_none_or(|f| f.includes_pumpfun()) && pumpfun_outer_data_may_parse(data) {
+        return true;
+    }
+    supported_unified_outer_programs().iter().any(|program_id| {
+        is_supported_unified_outer_program(program_id, filter)
+            && unified_outer_data_may_parse(*program_id, data)
+    })
+}
 
 #[inline(always)]
 fn push_unique_mint(mints: &mut PumpMintSet, mint: Pubkey) {
@@ -55,13 +259,23 @@ fn scan_create_mint_from_ix(
     created_mints: &mut PumpMintSet,
     mayhem_mints: &mut PumpMintSet,
 ) {
-    if instruction_references_loaded_key(program_id_index, ix_accounts, static_keys.len()) {
+    if data.len() < 8 {
+        return;
+    }
+    if program_id_references_loaded_key(program_id_index, static_keys.len()) {
+        scan_create_mint_from_unknown_program_ix(
+            ix_accounts,
+            data,
+            static_keys,
+            created_mints,
+            mayhem_mints,
+        );
         return;
     }
     let Some(program_id) = static_keys.get(program_id_index as usize) else {
         return;
     };
-    if *program_id != PROGRAM_ID_PUBKEY || data.len() < 8 {
+    if *program_id != PROGRAM_ID_PUBKEY {
         return;
     }
     let disc: [u8; 8] = data[0..8].try_into().unwrap_or_default();
@@ -85,14 +299,36 @@ fn scan_create_mint_from_ix(
     }
 }
 
-#[inline(always)]
-fn instruction_references_loaded_key(
-    program_id_index: u8,
+#[inline]
+fn scan_create_mint_from_unknown_program_ix(
     ix_accounts: &[u8],
-    static_key_len: usize,
-) -> bool {
-    program_id_index as usize >= static_key_len
-        || ix_accounts.iter().any(|&idx| idx as usize >= static_key_len)
+    data: &[u8],
+    static_keys: &[Pubkey],
+    created_mints: &mut PumpMintSet,
+    mayhem_mints: &mut PumpMintSet,
+) {
+    if data.len() < 8 {
+        return;
+    }
+    let disc: [u8; 8] = data[0..8].try_into().unwrap_or_default();
+    if disc != discriminators::CREATE && disc != discriminators::CREATE_V2 {
+        return;
+    }
+    let Some(&mint_idx) = ix_accounts.first() else {
+        return;
+    };
+    let Some(&mint) = static_keys.get(mint_idx as usize) else {
+        return;
+    };
+    push_unique_mint(created_mints, mint);
+    if disc == discriminators::CREATE_V2 {
+        let is_mayhem = crate::instr::utils::parse_create_v2_tail_fields(&data[8..])
+            .map(|(_, m, _)| m)
+            .unwrap_or(false);
+        if is_mayhem {
+            push_unique_mint(mayhem_mints, mint);
+        }
+    }
 }
 
 /// 第一遍：收集本笔交易内 Pump Create/CreateV2 的 mint（**零指令副本**，直接引用 message 内 `CompiledInstruction`）。
@@ -148,10 +384,26 @@ fn dispatch_shred_outer(
     mayhem_mints: &PumpMintSet,
     events: &mut Vec<DexEvent>,
 ) {
-    if instruction_references_loaded_key(program_id_index, ix_accounts, static_keys.len()) {
+    if data.is_empty() {
+        return;
+    }
+    if program_id_references_loaded_key(program_id_index, static_keys.len()) {
         log::trace!(
             target: "sol_parser_sdk::shredstream",
-            "skip shred outer ix because it references ALT-loaded accounts; wait for gRPC meta"
+            "program_id_index references an ALT-loaded account; trying discriminator-only best-effort parse"
+        );
+        parse_unknown_program_outer(
+            ix_accounts,
+            data,
+            static_keys,
+            signature,
+            slot,
+            tx_index,
+            recv_us,
+            filter,
+            created_mints,
+            mayhem_mints,
+            events,
         );
         return;
     }
@@ -159,13 +411,13 @@ fn dispatch_shred_outer(
         return;
     };
     if *program_id == PROGRAM_ID_PUBKEY {
-        if filter.is_some_and(|f| !f.includes_pumpfun()) {
+        if filter.is_some_and(|f| !f.includes_pumpfun()) || !pumpfun_outer_data_may_parse(data) {
             return;
         }
+        let accounts = build_shred_ix_accounts(static_keys, ix_accounts);
         if let Some(ev) = parse_pumpfun_instruction(
             data,
-            static_keys,
-            ix_accounts,
+            &accounts,
             signature,
             slot,
             tx_index,
@@ -182,11 +434,14 @@ fn dispatch_shred_outer(
     if !is_supported_unified_outer_program(program_id, filter) {
         return;
     }
+    if !unified_outer_data_may_parse(*program_id, data) {
+        return;
+    }
+    let accounts = build_shred_ix_accounts(static_keys, ix_accounts);
     if let Some(ev) = parse_non_pump_dex_outer(
         *program_id,
         data,
-        ix_accounts,
-        static_keys,
+        &accounts,
         signature,
         slot,
         tx_index,
@@ -197,25 +452,71 @@ fn dispatch_shred_outer(
     }
 }
 
+#[inline]
+fn parse_unknown_program_outer(
+    ix_accounts: &[u8],
+    data: &[u8],
+    static_keys: &[Pubkey],
+    signature: Signature,
+    slot: u64,
+    tx_index: u64,
+    recv_us: i64,
+    filter: Option<&EventTypeFilter>,
+    created_mints: &PumpMintSet,
+    mayhem_mints: &PumpMintSet,
+    events: &mut Vec<DexEvent>,
+) {
+    if !unknown_outer_data_may_parse(data, filter) {
+        return;
+    }
+    let accounts = build_shred_ix_accounts(static_keys, ix_accounts);
+
+    if filter.is_none_or(|f| f.includes_pumpfun()) && pumpfun_outer_data_may_parse(data) {
+        if let Some(ev) = parse_pumpfun_instruction(
+            data,
+            &accounts,
+            signature,
+            slot,
+            tx_index,
+            recv_us,
+            created_mints,
+            mayhem_mints,
+        )
+        .filter(|ev| filter.map(|f| f.should_include_dex_event(ev)).unwrap_or(true))
+        {
+            events.push(ev);
+            log::trace!(
+                target: "sol_parser_sdk::shredstream",
+                "unknown-program shred ix parsed as first matching candidate; use a narrow filter to avoid discriminator collisions"
+            );
+            return;
+        }
+    }
+
+    for &program_id in supported_unified_outer_programs() {
+        if !is_supported_unified_outer_program(&program_id, filter) {
+            continue;
+        }
+        if let Some(ev) = parse_non_pump_dex_outer(
+            program_id, data, &accounts, signature, slot, tx_index, recv_us, filter,
+        ) {
+            events.push(ev);
+            log::trace!(
+                target: "sol_parser_sdk::shredstream",
+                "unknown-program shred ix parsed as first matching candidate; use a narrow filter to avoid discriminator collisions"
+            );
+            return;
+        }
+    }
+}
+
 #[inline(always)]
 fn is_supported_unified_outer_program(
     program_id: &Pubkey,
     filter: Option<&EventTypeFilter>,
 ) -> bool {
     let Some(f) = filter else {
-        return matches!(
-            *program_id,
-            PUMPSWAP_PROGRAM_ID
-                | PUMP_FEES_PROGRAM_ID
-                | BONK_PROGRAM_ID
-                | RAYDIUM_CPMM_PROGRAM_ID
-                | RAYDIUM_CLMM_PROGRAM_ID
-                | RAYDIUM_AMM_V4_PROGRAM_ID
-                | ORCA_WHIRLPOOL_PROGRAM_ID
-                | METEORA_POOLS_PROGRAM_ID
-                | METEORA_DAMM_V2_PROGRAM_ID
-                | METEORA_DLMM_PROGRAM_ID
-        );
+        return supported_unified_outer_programs().contains(program_id);
     };
 
     if *program_id == PUMPSWAP_PROGRAM_ID {
@@ -247,21 +548,16 @@ fn is_supported_unified_outer_program(
 fn parse_non_pump_dex_outer(
     program_id: Pubkey,
     data: &[u8],
-    ix_accounts: &[u8],
-    static_keys: &[Pubkey],
+    accounts: &[Pubkey],
     signature: Signature,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
     filter: Option<&EventTypeFilter>,
 ) -> Option<DexEvent> {
-    let mut accounts: SmallVec<[Pubkey; 64]> = SmallVec::new();
-    for &idx in ix_accounts {
-        accounts.push(*static_keys.get(idx as usize)?);
-    }
     crate::instr::parse_instruction_unified(
         data,
-        &accounts,
+        accounts,
         signature,
         slot,
         tx_index,
@@ -324,8 +620,11 @@ fn parse_transaction_pump_events_with_filter(
     events: &mut Vec<DexEvent>,
 ) {
     let static_keys = transaction.message.static_account_keys();
-    let (created_mints, mayhem_mints) =
-        detect_pumpfun_create_mints(&transaction.message, static_keys);
+    let (created_mints, mayhem_mints) = if filter.is_none_or(|f| f.includes_pumpfun()) {
+        detect_pumpfun_create_mints(&transaction.message, static_keys)
+    } else {
+        (PumpMintSet::new(), PumpMintSet::new())
+    };
     match &transaction.message {
         VersionedMessage::Legacy(msg) => {
             for ix in &msg.instructions {
@@ -372,7 +671,6 @@ fn parse_transaction_pump_events_with_filter(
 fn parse_pumpfun_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
@@ -387,28 +685,15 @@ fn parse_pumpfun_instruction(
     let ix_data = &data[8..];
 
     match disc {
-        d if d == discriminators::CREATE => parse_create_instruction(
-            data,
-            accounts,
-            ix_accounts,
-            signature,
-            slot,
-            tx_index,
-            recv_us,
-        ),
-        d if d == discriminators::CREATE_V2 => parse_create_v2_instruction(
-            data,
-            accounts,
-            ix_accounts,
-            signature,
-            slot,
-            tx_index,
-            recv_us,
-        ),
+        d if d == discriminators::CREATE => {
+            parse_create_instruction(data, accounts, signature, slot, tx_index, recv_us)
+        }
+        d if d == discriminators::CREATE_V2 => {
+            parse_create_v2_instruction(data, accounts, signature, slot, tx_index, recv_us)
+        }
         d if d == discriminators::BUY => parse_buy_instruction(
             ix_data,
             accounts,
-            ix_accounts,
             signature,
             slot,
             tx_index,
@@ -416,19 +701,12 @@ fn parse_pumpfun_instruction(
             created_mints,
             mayhem_mints,
         ),
-        d if d == discriminators::SELL => parse_sell_instruction(
-            ix_data,
-            accounts,
-            ix_accounts,
-            signature,
-            slot,
-            tx_index,
-            recv_us,
-        ),
+        d if d == discriminators::SELL => {
+            parse_sell_instruction(ix_data, accounts, signature, slot, tx_index, recv_us)
+        }
         d if d == discriminators::BUY_EXACT_SOL_IN => parse_buy_exact_sol_in_instruction(
             ix_data,
             accounts,
-            ix_accounts,
             signature,
             slot,
             tx_index,
@@ -439,7 +717,6 @@ fn parse_pumpfun_instruction(
         d if d == discriminators::BUY_V2 => parse_buy_v2_instruction(
             ix_data,
             accounts,
-            ix_accounts,
             signature,
             slot,
             tx_index,
@@ -450,7 +727,6 @@ fn parse_pumpfun_instruction(
         d if d == discriminators::BUY_EXACT_QUOTE_IN_V2 => parse_buy_exact_quote_in_v2_instruction(
             ix_data,
             accounts,
-            ix_accounts,
             signature,
             slot,
             tx_index,
@@ -458,24 +734,11 @@ fn parse_pumpfun_instruction(
             created_mints,
             mayhem_mints,
         ),
-        d if d == discriminators::SELL_V2 => parse_sell_v2_instruction(
-            ix_data,
-            accounts,
-            ix_accounts,
-            signature,
-            slot,
-            tx_index,
-            recv_us,
-        ),
+        d if d == discriminators::SELL_V2 => {
+            parse_sell_v2_instruction(ix_data, accounts, signature, slot, tx_index, recv_us)
+        }
         d if d == discriminators::MIGRATE_BONDING_CURVE_CREATOR => {
-            parse_migrate_bonding_curve_creator_shred(
-                accounts,
-                ix_accounts,
-                signature,
-                slot,
-                tx_index,
-                recv_us,
-            )
+            parse_migrate_bonding_curve_creator_shred(accounts, signature, slot, tx_index, recv_us)
         }
         _ => None,
     }
@@ -486,19 +749,16 @@ fn parse_pumpfun_instruction(
 #[inline]
 fn parse_migrate_bonding_curve_creator_shred(
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
 ) -> Option<DexEvent> {
     const MIN_ACC: usize = 5;
-    if ix_accounts.len() < MIN_ACC {
+    if accounts.len() < MIN_ACC {
         return None;
     }
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
     let mint = get_account(0)?;
     let bonding_curve = get_account(1).unwrap_or_default();
     let sharing_config = get_account(2).unwrap_or_default();
@@ -525,19 +785,16 @@ fn parse_migrate_bonding_curve_creator_shred(
 fn parse_create_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
 ) -> Option<DexEvent> {
-    if ix_accounts.len() < 10 {
+    if accounts.len() < 10 {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let mut offset = 8;
 
@@ -599,20 +856,17 @@ fn parse_create_instruction(
 fn parse_create_v2_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
 ) -> Option<DexEvent> {
     const CREATE_V2_MIN_ACCOUNTS: usize = 16;
-    if ix_accounts.len() < CREATE_V2_MIN_ACCOUNTS {
+    if accounts.len() < CREATE_V2_MIN_ACCOUNTS {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let payload = &data[8..];
     let mut offset = 0usize;
@@ -690,7 +944,6 @@ fn parse_create_v2_instruction(
 fn parse_buy_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
@@ -699,13 +952,11 @@ fn parse_buy_instruction(
     mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     const LEGACY_BUY_ACCOUNTS: usize = 16;
-    if ix_accounts.len() < LEGACY_BUY_ACCOUNTS {
+    if accounts.len() < LEGACY_BUY_ACCOUNTS {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let (token_amount, sol_amount) = if data.len() >= 16 {
         (read_u64_le(data, 0).unwrap_or(0), read_u64_le(data, 8).unwrap_or(0))
@@ -786,20 +1037,17 @@ fn parse_buy_instruction(
 fn parse_sell_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
 ) -> Option<DexEvent> {
     const LEGACY_SELL_ACCOUNTS: usize = 14;
-    if ix_accounts.len() < LEGACY_SELL_ACCOUNTS {
+    if accounts.len() < LEGACY_SELL_ACCOUNTS {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let (token_amount, sol_amount) = if data.len() >= 16 {
         (read_u64_le(data, 0).unwrap_or(0), read_u64_le(data, 8).unwrap_or(0))
@@ -823,7 +1071,7 @@ fn parse_sell_instruction(
         quote_mint: PUMPFUN_SOLSCAN_SOL_QUOTE_MINT,
         global: get_account(0).unwrap_or_default(),
         bonding_curve: get_account(3).unwrap_or_default(),
-        bonding_curve_v2: if ix_accounts.len() >= 17 {
+        bonding_curve_v2: if accounts.len() >= 17 {
             get_account(15).unwrap_or_default()
         } else {
             get_account(14).unwrap_or_default()
@@ -846,7 +1094,7 @@ fn parse_sell_instruction(
         event_authority: get_account(10).unwrap_or_default(),
         program: get_account(11).unwrap_or_default(),
         global_volume_accumulator: Pubkey::default(),
-        user_volume_accumulator: if ix_accounts.len() >= 17 {
+        user_volume_accumulator: if accounts.len() >= 17 {
             get_account(14).unwrap_or_default()
         } else {
             Pubkey::default()
@@ -875,12 +1123,12 @@ fn parse_sell_instruction(
         cashback_fee_basis_points: 0,
         cashback: 0,
         is_cashback_coin: false,
-        buyback_fee_recipient: if ix_accounts.len() >= 17 {
+        buyback_fee_recipient: if accounts.len() >= 17 {
             get_account(16).unwrap_or_default()
         } else {
             get_account(15).unwrap_or_default()
         },
-        account: if ix_accounts.len() >= 17 {
+        account: if accounts.len() >= 17 {
             get_account(16).filter(|pk| *pk != Pubkey::default())
         } else {
             get_account(15).filter(|pk| *pk != Pubkey::default())
@@ -893,7 +1141,6 @@ fn parse_sell_instruction(
 fn parse_buy_exact_sol_in_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
@@ -902,13 +1149,11 @@ fn parse_buy_exact_sol_in_instruction(
     mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     const LEGACY_BUY_ACCOUNTS: usize = 16;
-    if ix_accounts.len() < LEGACY_BUY_ACCOUNTS {
+    if accounts.len() < LEGACY_BUY_ACCOUNTS {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let (sol_amount, token_amount) = if data.len() >= 16 {
         (read_u64_le(data, 0).unwrap_or(0), read_u64_le(data, 8).unwrap_or(0))
@@ -990,7 +1235,6 @@ fn parse_buy_exact_sol_in_instruction(
 fn parse_buy_v2_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
@@ -999,13 +1243,11 @@ fn parse_buy_v2_instruction(
     mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     const MIN_ACC: usize = 27;
-    if ix_accounts.len() < MIN_ACC {
+    if accounts.len() < MIN_ACC {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let (token_amount, sol_amount) = if data.len() >= 16 {
         (read_u64_le(data, 0).unwrap_or(0), read_u64_le(data, 8).unwrap_or(0))
@@ -1094,7 +1336,6 @@ fn parse_buy_v2_instruction(
 fn parse_buy_exact_quote_in_v2_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
@@ -1103,13 +1344,11 @@ fn parse_buy_exact_quote_in_v2_instruction(
     mayhem_mints: &PumpMintSet,
 ) -> Option<DexEvent> {
     const MIN_ACC: usize = 27;
-    if ix_accounts.len() < MIN_ACC {
+    if accounts.len() < MIN_ACC {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let (sol_amount, token_amount) = if data.len() >= 16 {
         (read_u64_le(data, 0).unwrap_or(0), read_u64_le(data, 8).unwrap_or(0))
@@ -1200,20 +1439,17 @@ fn parse_buy_exact_quote_in_v2_instruction(
 fn parse_sell_v2_instruction(
     data: &[u8],
     accounts: &[Pubkey],
-    ix_accounts: &[u8],
     signature: Signature,
     slot: u64,
     tx_index: u64,
     recv_us: i64,
 ) -> Option<DexEvent> {
     const MIN_ACC: usize = 26;
-    if ix_accounts.len() < MIN_ACC {
+    if accounts.len() < MIN_ACC {
         return None;
     }
 
-    let get_account = |idx: usize| -> Option<Pubkey> {
-        ix_accounts.get(idx).and_then(|&i| accounts.get(i as usize)).copied()
-    };
+    let get_account = |idx: usize| -> Option<Pubkey> { accounts.get(idx).copied() };
 
     let (token_amount, sol_amount) = if data.len() >= 16 {
         (read_u64_le(data, 0).unwrap_or(0), read_u64_le(data, 8).unwrap_or(0))
@@ -1299,7 +1535,11 @@ fn parse_sell_v2_instruction(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solana_sdk::hash::Hash;
+    use solana_sdk::message::compiled_instruction::CompiledInstruction;
+    use solana_sdk::message::{v0, MessageHeader};
     use solana_sdk::signature::Signature;
+    use solana_sdk::transaction::VersionedTransaction;
 
     fn unique_accounts(n: usize) -> Vec<Pubkey> {
         (0..n).map(|_| Pubkey::new_unique()).collect()
@@ -1314,6 +1554,47 @@ mod tests {
         data.extend_from_slice(&first.to_le_bytes());
         data.extend_from_slice(&second.to_le_bytes());
         data
+    }
+
+    fn str_arg(s: &str, out: &mut Vec<u8>) {
+        out.extend_from_slice(&(s.len() as u32).to_le_bytes());
+        out.extend_from_slice(s.as_bytes());
+    }
+
+    fn create_data() -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&discriminators::CREATE);
+        str_arg("Alt Coin", &mut data);
+        str_arg("ALT", &mut data);
+        str_arg("https://example.invalid/alt.json", &mut data);
+        data.extend_from_slice(Pubkey::new_unique().as_ref());
+        data
+    }
+
+    fn v0_tx(
+        program_id_index: u8,
+        account_keys: Vec<Pubkey>,
+        ix_accounts: Vec<u8>,
+        data: Vec<u8>,
+    ) -> VersionedTransaction {
+        VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(v0::Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys,
+                recent_blockhash: Hash::default(),
+                instructions: vec![CompiledInstruction::new_from_raw_parts(
+                    program_id_index,
+                    data,
+                    ix_accounts,
+                )],
+                address_table_lookups: Vec::new(),
+            }),
+        }
     }
 
     #[test]
@@ -1350,18 +1631,214 @@ mod tests {
     }
 
     #[test]
+    fn shred_pumpfun_create_best_effort_keeps_static_mint_when_other_accounts_are_alt() {
+        let mut static_keys = vec![Pubkey::new_unique(); 10];
+        static_keys[9] = PROGRAM_ID_PUBKEY;
+        let mint = static_keys[0];
+        let mut ix_accounts = ix_accounts(10);
+        ix_accounts[2] = 44;
+        ix_accounts[7] = 45;
+        ix_accounts[9] = 46;
+
+        let tx = v0_tx(9, static_keys, ix_accounts, create_data());
+        let mut events = Vec::new();
+        parse_transaction_dex_events_with_filter(
+            &tx,
+            Signature::default(),
+            123,
+            0,
+            456,
+            None,
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DexEvent::PumpFunCreate(event) => {
+                assert_eq!(event.mint, mint);
+                assert_eq!(event.name, "Alt Coin");
+                assert_eq!(event.bonding_curve, Pubkey::default());
+                assert_eq!(event.user, Pubkey::default());
+                assert_eq!(event.token_program, Pubkey::default());
+            }
+            other => panic!("expected PumpFunCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shred_pumpfun_create_uses_instruction_order_accounts() {
+        let mut static_keys = vec![Pubkey::new_unique(); 12];
+        static_keys[9] = PROGRAM_ID_PUBKEY;
+        let mint = static_keys[5];
+        let bonding_curve = static_keys[3];
+        let user = static_keys[11];
+        let token_program = static_keys[4];
+        let mut ix_accounts = vec![5, 1, 3, 2, 6, 7, 8, 11, 10, 4];
+        ix_accounts[8] = 44;
+
+        let tx = v0_tx(9, static_keys, ix_accounts, create_data());
+        let mut events = Vec::new();
+        parse_transaction_dex_events_with_filter(
+            &tx,
+            Signature::default(),
+            123,
+            0,
+            456,
+            None,
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DexEvent::PumpFunCreate(event) => {
+                assert_eq!(event.mint, mint);
+                assert_eq!(event.bonding_curve, bonding_curve);
+                assert_eq!(event.user, user);
+                assert_eq!(event.token_program, token_program);
+            }
+            other => panic!("expected PumpFunCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn shred_best_effort_parses_when_program_id_is_alt_loaded() {
+        let static_keys = vec![PROGRAM_ID_PUBKEY; 2];
+        let created_mint = static_keys[0];
+        let tx = v0_tx(7, static_keys, ix_accounts(10), create_data());
+        let mut events = Vec::new();
+
+        parse_transaction_dex_events_with_filter(
+            &tx,
+            Signature::default(),
+            123,
+            0,
+            456,
+            None,
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            DexEvent::PumpFunCreate(e) => assert_eq!(e.mint, created_mint),
+            other => panic!("expected PumpFunCreate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_program_without_filter_stops_after_first_matching_candidate() {
+        let static_keys = vec![Pubkey::new_unique(); 18];
+        let ix_accounts = ix_accounts(18);
+        let mut data = Vec::new();
+        data.extend_from_slice(&discriminators::BUY);
+        data.extend_from_slice(&100_u64.to_le_bytes());
+        data.extend_from_slice(&200_u64.to_le_bytes());
+        let tx = v0_tx(30, static_keys, ix_accounts, data);
+        let mut events = Vec::new();
+
+        parse_transaction_dex_events_with_filter(
+            &tx,
+            Signature::default(),
+            123,
+            0,
+            456,
+            None,
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], DexEvent::PumpFunBuy(_)));
+    }
+
+    #[test]
+    fn unknown_program_outer_uses_filter_to_parse_matching_protocol() {
+        let static_keys = vec![RAYDIUM_CPMM_PROGRAM_ID, Pubkey::new_unique()];
+        let ix_accounts = vec![1, 42];
+        let mut data = Vec::new();
+        data.extend_from_slice(&crate::instr::raydium_cpmm::discriminators::SWAP_BASE_IN);
+        data.extend_from_slice(&100_u64.to_le_bytes());
+        data.extend_from_slice(&90_u64.to_le_bytes());
+        let tx = v0_tx(9, static_keys, ix_accounts, data);
+        let filter =
+            EventTypeFilter::include_only(vec![crate::grpc::types::EventType::RaydiumCpmmSwap]);
+        let mut events = Vec::new();
+
+        parse_transaction_dex_events_with_filter(
+            &tx,
+            Signature::default(),
+            123,
+            0,
+            456,
+            Some(&filter),
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], DexEvent::RaydiumCpmmSwap(_)));
+    }
+
+    #[test]
+    fn non_pump_outer_accounts_keep_instruction_length_with_alt_defaults() {
+        let static_keys = vec![RAYDIUM_CPMM_PROGRAM_ID, Pubkey::new_unique()];
+        let ix_accounts = vec![1, 42];
+        let mut data = Vec::new();
+        data.extend_from_slice(&crate::instr::raydium_cpmm::discriminators::SWAP_BASE_IN);
+        data.extend_from_slice(&100_u64.to_le_bytes());
+        data.extend_from_slice(&90_u64.to_le_bytes());
+        let mut events = Vec::new();
+
+        dispatch_shred_outer(
+            0,
+            &ix_accounts,
+            &data,
+            &static_keys,
+            Signature::default(),
+            123,
+            0,
+            456,
+            None,
+            &PumpMintSet::new(),
+            &PumpMintSet::new(),
+            &mut events,
+        );
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], DexEvent::RaydiumCpmmSwap(_)));
+    }
+
+    #[test]
+    fn non_pump_outer_skips_unsupported_discriminator_before_account_fill() {
+        let static_keys = vec![RAYDIUM_CPMM_PROGRAM_ID, Pubkey::new_unique()];
+        let ix_accounts = vec![99];
+        let data = vec![0xff; 8];
+        let mut events = Vec::new();
+
+        dispatch_shred_outer(
+            0,
+            &ix_accounts,
+            &data,
+            &static_keys,
+            Signature::default(),
+            123,
+            0,
+            456,
+            None,
+            &PumpMintSet::new(),
+            &PumpMintSet::new(),
+            &mut events,
+        );
+
+        assert!(events.is_empty());
+    }
+
+    #[test]
     fn shred_pumpfun_trade_variants_are_specific_and_keep_exact_fields() {
         let accounts = unique_accounts(27);
-        let legacy_buy_ix = ix_accounts(18);
-        let legacy_sell_ix = ix_accounts(17);
-        let v2_ix = ix_accounts(27);
         let no_created = PumpMintSet::new();
         let no_mayhem = PumpMintSet::new();
 
         let buy = parse_buy_instruction(
             &amount_data(100, 200),
             &accounts,
-            &legacy_buy_ix,
             Signature::default(),
             1,
             0,
@@ -1382,7 +1859,6 @@ mod tests {
         let sell = parse_sell_instruction(
             &amount_data(300, 400),
             &accounts,
-            &legacy_sell_ix,
             Signature::default(),
             1,
             0,
@@ -1402,7 +1878,6 @@ mod tests {
         let exact_quote = parse_buy_exact_quote_in_v2_instruction(
             &amount_data(500, 600),
             &accounts,
-            &v2_ix,
             Signature::default(),
             1,
             0,
@@ -1438,8 +1913,7 @@ mod tests {
 
         assert!(parse_buy_instruction(
             &amount_data(100, 200),
-            &accounts,
-            &ix_accounts(15),
+            &accounts[..15],
             Signature::default(),
             1,
             0,
@@ -1451,8 +1925,7 @@ mod tests {
 
         assert!(parse_sell_instruction(
             &amount_data(300, 400),
-            &accounts,
-            &ix_accounts(13),
+            &accounts[..13],
             Signature::default(),
             1,
             0,

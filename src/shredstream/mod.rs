@@ -30,7 +30,7 @@
 //!
 //! ## 限制说明
 //! ShredStream 相比 gRPC 订阅有以下限制：
-//! - 仅 `static_account_keys()`：V0 交易若带 **地址查找表（ALT）**，会只解析账户索引全部落在静态表内的指令；引用 ALT-loaded 账户的指令会跳过，等待 gRPC meta 路径解析。
+//! - 仅 `static_account_keys()`：V0 交易若带 **地址查找表（ALT）**，ALT-loaded 指令账户会以 `Pubkey::default()` 占位；若程序 ID 也来自 ALT，会按指令 discriminator 做 best-effort 解析。
 //! - 不解析 **inner instructions**：只覆盖外层指令可解析的事件；若事件只存在于 CPI/Program log，需使用 gRPC/RPC 路径。
 //! - 无 block_time，恒为 0
 //! - tx_index 在单个 ShredStream payload 内递增，不保证等同于完整 slot 全局交易索引

@@ -108,13 +108,13 @@ sol-parser-sdk = { path = "../sol-parser-sdk", default-features = false, feature
 
 ```toml
 # 在 Cargo.toml 中添加
-sol-parser-sdk = "0.5.0"
+sol-parser-sdk = "0.5.1"
 ```
 
 或使用零拷贝解析器（最高性能）：
 
 ```toml
-sol-parser-sdk = { version = "0.5.0", default-features = false, features = ["parse-zero-copy"] }
+sol-parser-sdk = { version = "0.5.1", default-features = false, features = ["parse-zero-copy"] }
 ```
 
 ### 性能测试
@@ -300,8 +300,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ```
 
 **ShredStream 限制：**
-- 仅 `static_account_keys()` - 使用 ALT 的交易可能有错误的账户
-- 无 Inner Instructions - 无法解析 CPI 调用
+- 仅 `static_account_keys()` - ALT-loaded 指令账户会使用默认账户占位，外层指令会基于 data/discriminator 尽量解析
+- 无 Inner Instructions - 无法从 ShredStream entry 恢复 CPI/inner-only 事件
 - 无 block_time - 恒为 0
 - tx_index 是 entry 内索引而非 slot 内索引
 
