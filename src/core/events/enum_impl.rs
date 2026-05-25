@@ -7,6 +7,7 @@ use solana_sdk::signature::Signature;
 
 /// 统一的 DEX 事件枚举 - 参考 sol-dex-shreds 的做法
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum DexEvent {
     // PumpFun 事件
     PumpFunCreate(PumpFunCreateTokenEvent),     // - 已对接

@@ -237,6 +237,7 @@ pub enum Protocol {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum EventType {
     // Block events
     BlockMeta,
