@@ -24,6 +24,25 @@ use crate::DexEvent;
 
 static SHREDSTREAM_DROPPED_EVENTS: AtomicU64 = AtomicU64::new(0);
 
+enum EventSink<'a> {
+    Queue(&'a Arc<ArrayQueue<DexEvent>>),
+    Callback(&'a (dyn Fn(DexEvent) + Send + Sync)),
+}
+
+impl EventSink<'_> {
+    #[inline]
+    fn deliver(&self, event: DexEvent) {
+        match self {
+            EventSink::Queue(queue) => {
+                if queue.push(event).is_err() {
+                    record_shredstream_dropped_event();
+                }
+            }
+            EventSink::Callback(callback) => callback(event),
+        }
+    }
+}
+
 #[inline]
 fn record_shredstream_dropped_event() -> u64 {
     let dropped = SHREDSTREAM_DROPPED_EVENTS.fetch_add(1, Ordering::Relaxed) + 1;
@@ -100,8 +119,8 @@ impl ShredStreamClient {
                 match Self::stream_events(
                     &endpoint,
                     &config,
-                    &queue_clone,
                     event_type_filter.as_ref(),
+                    EventSink::Queue(&queue_clone),
                 )
                 .await
                 {
@@ -120,6 +139,59 @@ impl ShredStreamClient {
 
         *self.subscription_handle.lock().await = Some(handle);
         Ok(queue)
+    }
+
+    /// 订阅 DEX 事件，并在解析热路径中直接回调事件，避免跨任务队列调度。
+    ///
+    /// 这是最低延迟路径；回调会在 ShredStream 读流任务内执行，应避免阻塞 I/O 或重计算。
+    pub async fn subscribe_with_filter_callback<F>(
+        &self,
+        event_type_filter: Option<EventTypeFilter>,
+        callback: F,
+    ) -> crate::common::AnyResult<()>
+    where
+        F: Fn(DexEvent) + Send + Sync + 'static,
+    {
+        self.stop().await;
+
+        let endpoint = self.endpoint.clone();
+        let config = self.config.clone();
+        let callback = Arc::new(callback);
+
+        let handle = tokio::spawn(async move {
+            let mut delay = config.reconnect_delay_ms;
+            let mut attempts = 0u32;
+
+            loop {
+                if config.max_reconnect_attempts > 0 && attempts >= config.max_reconnect_attempts {
+                    log::error!("Max reconnection attempts reached, giving up");
+                    break;
+                }
+                attempts += 1;
+
+                match Self::stream_events_callback(
+                    &endpoint,
+                    &config,
+                    event_type_filter.as_ref(),
+                    callback.clone(),
+                )
+                .await
+                {
+                    Ok(_) => {
+                        delay = config.reconnect_delay_ms;
+                        attempts = 0;
+                    }
+                    Err(e) => {
+                        log::error!("ShredStream error: {} - retry in {}ms", e, delay);
+                        tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
+                        delay = (delay * 2).min(60_000);
+                    }
+                }
+            }
+        });
+
+        *self.subscription_handle.lock().await = Some(handle);
+        Ok(())
     }
 
     /// 停止订阅
@@ -146,8 +218,8 @@ impl ShredStreamClient {
     async fn stream_events(
         endpoint: &str,
         config: &ShredStreamConfig,
-        queue: &Arc<ArrayQueue<DexEvent>>,
         event_type_filter: Option<&EventTypeFilter>,
+        sink: EventSink<'_>,
     ) -> Result<(), String> {
         let mut client = Self::connect_client(endpoint, config).await.map_err(|e| e.to_string())?;
         let request = tonic::Request::new(SubscribeEntriesRequest {});
@@ -171,10 +243,11 @@ impl ShredStreamClient {
 
         log::info!("ShredStream connected, receiving entries...");
 
+        let mut events = Vec::with_capacity(4);
         while let Some(message) = stream.next().await {
             match message {
                 Ok(entry) => {
-                    Self::process_entry(entry, queue, event_type_filter);
+                    Self::process_entry(entry, event_type_filter, &sink, &mut events);
                 }
                 Err(e) => {
                     log::error!("Stream error: {:?}", e);
@@ -186,12 +259,28 @@ impl ShredStreamClient {
         Ok(())
     }
 
+    async fn stream_events_callback(
+        endpoint: &str,
+        config: &ShredStreamConfig,
+        event_type_filter: Option<&EventTypeFilter>,
+        callback: Arc<dyn Fn(DexEvent) + Send + Sync>,
+    ) -> Result<(), String> {
+        Self::stream_events(
+            endpoint,
+            config,
+            event_type_filter,
+            EventSink::Callback(callback.as_ref()),
+        )
+        .await
+    }
+
     /// 处理单个 Entry 消息
     #[inline]
     fn process_entry(
         entry: Entry,
-        queue: &Arc<ArrayQueue<DexEvent>>,
         event_type_filter: Option<&EventTypeFilter>,
+        sink: &EventSink<'_>,
+        events: &mut Vec<DexEvent>,
     ) {
         let slot = entry.slot;
         let recv_us = now_micros();
@@ -206,7 +295,6 @@ impl ShredStreamClient {
         };
 
         // 处理每个 Entry 中的交易
-        let mut events = Vec::with_capacity(4);
         let mut tx_index = 0u64;
         for entry in entries {
             for transaction in entry.transactions.iter() {
@@ -216,9 +304,9 @@ impl ShredStreamClient {
                     slot,
                     recv_us,
                     tx_index,
-                    queue,
                     event_type_filter,
-                    &mut events,
+                    events,
+                    sink,
                 );
                 tx_index += 1;
             }
@@ -232,7 +320,34 @@ impl ShredStreamClient {
         slot: u64,
         recv_us: i64,
         tx_index: u64,
-        queue: &Arc<ArrayQueue<DexEvent>>,
+        event_type_filter: Option<&EventTypeFilter>,
+        events: &mut Vec<DexEvent>,
+        sink: &EventSink<'_>,
+    ) {
+        if transaction.signatures.is_empty() {
+            return;
+        }
+
+        Self::parse_transaction_events(
+            transaction,
+            slot,
+            recv_us,
+            tx_index,
+            event_type_filter,
+            events,
+        );
+
+        for event in events.drain(..) {
+            sink.deliver(event);
+        }
+    }
+
+    #[inline]
+    fn parse_transaction_events(
+        transaction: &solana_sdk::transaction::VersionedTransaction,
+        slot: u64,
+        recv_us: i64,
+        tx_index: u64,
         event_type_filter: Option<&EventTypeFilter>,
         events: &mut Vec<DexEvent>,
     ) {
@@ -261,12 +376,9 @@ impl ShredStreamClient {
         );
         crate::core::pumpfun_fee_enrich::enrich_pumpfun_same_tx_post_merge(events);
 
-        for mut event in events.drain(..) {
+        for event in events.iter_mut() {
             if let Some(meta) = event.metadata_mut() {
                 meta.grpc_recv_us = recv_us;
-            }
-            if queue.push(event).is_err() {
-                record_shredstream_dropped_event();
             }
         }
     }
@@ -276,6 +388,54 @@ impl ShredStreamClient {
 mod tests {
     use super::*;
     use crate::core::events::{EventMetadata, PumpFunCreateTokenEvent};
+    use crate::instr::program_ids::PUMPFUN_PROGRAM_ID;
+    use solana_sdk::hash::Hash;
+    use solana_sdk::message::{
+        compiled_instruction::CompiledInstruction, v0, MessageHeader, VersionedMessage,
+    };
+    use solana_sdk::pubkey::Pubkey;
+    use solana_sdk::signature::Signature;
+    use solana_sdk::transaction::VersionedTransaction;
+    use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+    fn push_string(data: &mut Vec<u8>, value: &str) {
+        data.extend_from_slice(&(value.len() as u32).to_le_bytes());
+        data.extend_from_slice(value.as_bytes());
+    }
+
+    fn pumpfun_create_data() -> Vec<u8> {
+        let mut data = Vec::new();
+        data.extend_from_slice(&[24, 30, 200, 40, 5, 28, 7, 119]);
+        push_string(&mut data, "Callback Test");
+        push_string(&mut data, "CBT");
+        push_string(&mut data, "https://example.invalid/callback.json");
+        data.extend_from_slice(Pubkey::new_unique().as_ref());
+        data
+    }
+
+    fn pumpfun_create_tx() -> VersionedTransaction {
+        let mut account_keys = (0..10).map(|_| Pubkey::new_unique()).collect::<Vec<_>>();
+        account_keys.push(PUMPFUN_PROGRAM_ID);
+
+        VersionedTransaction {
+            signatures: vec![Signature::default()],
+            message: VersionedMessage::V0(v0::Message {
+                header: MessageHeader {
+                    num_required_signatures: 1,
+                    num_readonly_signed_accounts: 0,
+                    num_readonly_unsigned_accounts: 0,
+                },
+                account_keys,
+                recent_blockhash: Hash::default(),
+                instructions: vec![CompiledInstruction::new_from_raw_parts(
+                    10,
+                    pumpfun_create_data(),
+                    (0..10).collect(),
+                )],
+                address_table_lookups: Vec::new(),
+            }),
+        }
+    }
 
     #[test]
     fn dropped_counter_increments_without_panicking() {
@@ -300,5 +460,30 @@ mod tests {
         }
 
         assert!(SHREDSTREAM_DROPPED_EVENTS.load(Ordering::Relaxed) >= before + 1);
+    }
+
+    #[test]
+    fn callback_path_delivers_events_without_queue() {
+        let entries = vec![SolanaEntry {
+            num_hashes: 1,
+            hash: Hash::default(),
+            transactions: vec![pumpfun_create_tx()],
+        }];
+        let entry = Entry { slot: 42, entries: bincode::serialize(&entries).unwrap() };
+        let count = AtomicUsize::new(0);
+
+        let mut events = Vec::with_capacity(4);
+        ShredStreamClient::process_entry(
+            entry,
+            None,
+            &EventSink::Callback(&|event| {
+                assert!(matches!(event, DexEvent::PumpFunCreate(_)));
+                assert_eq!(event.metadata().slot, 42);
+                count.fetch_add(1, AtomicOrdering::Relaxed);
+            }),
+            &mut events,
+        );
+
+        assert_eq!(count.load(AtomicOrdering::Relaxed), 1);
     }
 }
